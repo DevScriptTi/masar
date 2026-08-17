@@ -1,0 +1,234 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --md-sys-color-primary: #6750a4;
+    --md-sys-color-on-primary: #ffffff;
+    --md-sys-color-primary-container: #eaddff;
+    --md-sys-color-on-primary-container: #21005d;
+    --md-sys-color-secondary: #625b71;
+    --md-sys-color-on-secondary: #ffffff;
+    --md-sys-color-secondary-container: #e8def8;
+    --md-sys-color-on-secondary-container: #1d192b;
+    --md-sys-color-tertiary: #7d5260;
+    --md-sys-color-on-tertiary: #ffffff;
+    --md-sys-color-tertiary-container: #ffd8e4;
+    --md-sys-color-on-tertiary-container: #31111d;
+    --md-sys-color-error: #b3261e;
+    --md-sys-color-on-error: #ffffff;
+    --md-sys-color-error-container: #f9dedc;
+    --md-sys-color-on-error-container: #410e0b;
+    --md-sys-color-background: #fef7ff;
+    --md-sys-color-on-background: #1d1b20;
+    --md-sys-color-surface: #fef7ff;
+    --md-sys-color-on-surface: #1d1b20;
+    --md-sys-color-surface-variant: #e7e0ec;
+    --md-sys-color-on-surface-variant: #49454f;
+    --md-sys-color-outline: #79747e;
+    --md-sys-color-outline-variant: #cac4d0;
+    --md-sys-color-surface-tint: #6750a4;
+  }
+
+  .dark {
+    --md-sys-color-primary: #d0bcff;
+    --md-sys-color-on-primary: #381e72;
+    --md-sys-color-primary-container: #4f378b;
+    --md-sys-color-on-primary-container: #eaddff;
+    --md-sys-color-secondary: #ccc2dc;
+    --md-sys-color-on-secondary: #332d41;
+    --md-sys-color-secondary-container: #4a4458;
+    --md-sys-color-on-secondary-container: #e8def8;
+    --md-sys-color-tertiary: #efb8c8;
+    --md-sys-color-on-tertiary: #492532;
+    --md-sys-color-tertiary-container: #633b48;
+    --md-sys-color-on-tertiary-container: #ffd8e4;
+    --md-sys-color-error: #f2b8b5;
+    --md-sys-color-on-error: #601410;
+    --md-sys-color-error-container: #8c1d18;
+    --md-sys-color-on-error-container: #f9dedc;
+    --md-sys-color-background: #141218;
+    --md-sys-color-on-background: #e6e0e9;
+    --md-sys-color-surface: #141218;
+    --md-sys-color-on-surface: #e6e0e9;
+    --md-sys-color-surface-variant: #49454f;
+    --md-sys-color-on-surface-variant: #cac4d0;
+    --md-sys-color-outline: #938f96;
+    --md-sys-color-outline-variant: #49454f;
+    --md-sys-color-surface-tint: #d0bcff;
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-cairo), Cairo, sans-serif;
+  --color-primary: var(--md-sys-color-primary);
+  --color-on-primary: var(--md-sys-color-on-primary);
+  --color-primary-container: var(--md-sys-color-primary-container);
+  --color-on-primary-container: var(--md-sys-color-on-primary-container);
+  --color-secondary: var(--md-sys-color-secondary);
+  --color-on-secondary: var(--md-sys-color-on-secondary);
+  --color-secondary-container: var(--md-sys-color-secondary-container);
+  --color-on-secondary-container: var(--md-sys-color-on-secondary-container);
+  --color-tertiary: var(--md-sys-color-tertiary);
+  --color-on-tertiary: var(--md-sys-color-on-tertiary);
+  --color-tertiary-container: var(--md-sys-color-tertiary-container);
+  --color-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
+  --color-surface: var(--md-sys-color-surface);
+  --color-on-surface: var(--md-sys-color-on-surface);
+  --color-surface-variant: var(--md-sys-color-surface-variant);
+  --color-on-surface-variant: var(--md-sys-color-on-surface-variant);
+  --color-background: var(--md-sys-color-background);
+  --color-on-background: var(--md-sys-color-on-background);
+  --color-outline: var(--md-sys-color-outline);
+  --color-outline-variant: var(--md-sys-color-outline-variant);
+  --color-error: var(--md-sys-color-error);
+  --color-on-error: var(--md-sys-color-on-error);
+  --color-error-container: var(--md-sys-color-error-container);
+  --color-on-error-container: var(--md-sys-color-on-error-container);
+}
+
+body {
+  background-color: var(--md-sys-color-background);
+  color: var(--md-sys-color-on-background);
+  font-family: inherit;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* Force LTR direction for all LaTeX math rendering */
+.katex, .katex-display, .mathjax, .math {
+  direction: ltr !important;
+  unicode-bidi: isolate !important;
+  text-align: left;
+}
+.katex-display {
+  text-align: center;
+}
+
+/* Quill Snow MD3 Theme Overrides */
+.rich-text-editor-wrapper .ql-toolbar.ql-snow {
+  border: none !important;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, rgba(121, 116, 126, 0.2)) !important;
+  background-color: var(--md-sys-color-surface, #fef7ff) !important;
+  direction: rtl !important;
+  text-align: right !important;
+  border-top-left-radius: 1rem !important;
+  border-top-right-radius: 1rem !important;
+}
+
+.rich-text-editor-wrapper .ql-container.ql-snow {
+  border: none !important;
+  font-family: inherit !important;
+  font-size: 0.875rem !important;
+  color: var(--md-sys-color-on-surface, #1d1b20) !important;
+  min-height: 140px !important;
+  direction: rtl !important;
+  text-align: right !important;
+  border-bottom-left-radius: 1rem !important;
+  border-bottom-right-radius: 1rem !important;
+}
+
+.rich-text-editor-wrapper .ql-editor {
+  min-height: 140px !important;
+  direction: rtl !important;
+  text-align: right !important;
+}
+
+.rich-text-editor-wrapper .ql-editor.ql-blank::before {
+  color: var(--md-sys-color-on-surface-variant, #49454f) !important;
+  font-style: normal !important;
+  right: 15px !important;
+  left: auto !important;
+}
+
+.dark .rich-text-editor-wrapper .ql-toolbar.ql-snow {
+  background-color: var(--md-sys-color-surface, #141218) !important;
+}
+
+/* Fix Quill Dropdowns & Pickers for Dark Mode */
+.dark .ql-snow .ql-picker-options {
+  background-color: var(--md-sys-color-surface, #141218) !important;
+  border: 1px solid var(--md-sys-color-outline-variant, rgba(255, 255, 255, 0.15)) !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5) !important;
+  padding: 0.5rem !important;
+}
+
+.dark .ql-snow .ql-picker-item {
+  color: var(--md-sys-color-on-surface, #e6e0e9) !important;
+}
+
+.dark .ql-snow .ql-picker-item:hover,
+.dark .ql-snow .ql-picker-item.ql-selected {
+  color: var(--md-sys-color-primary, #d0bcff) !important;
+}
+
+/* Fix Toolbar Icons & Pickers Color in Dark Mode */
+.dark .ql-snow .ql-stroke {
+  stroke: var(--md-sys-color-on-surface-variant, #cac4d0) !important;
+}
+
+.dark .ql-snow .ql-fill {
+  fill: var(--md-sys-color-on-surface-variant, #cac4d0) !important;
+}
+
+.dark .ql-snow .ql-picker {
+  color: var(--md-sys-color-on-surface-variant, #cac4d0) !important;
+}
+
+.dark .ql-snow .ql-picker.ql-expanded .ql-picker-label {
+  color: var(--md-sys-color-primary, #d0bcff) !important;
+  border-color: var(--md-sys-color-outline, #938f96) !important;
+}
+
+.dark .ql-snow .ql-picker.ql-expanded .ql-picker-label .ql-stroke {
+  stroke: var(--md-sys-color-primary, #d0bcff) !important;
+}
+
+.dark .ql-snow .ql-picker.ql-expanded .ql-picker-label .ql-fill {
+  fill: var(--md-sys-color-primary, #d0bcff) !important;
+}
+
+/* Rich Text Output Content Styling (Live Preview & Student Player) */
+.rich-text-content ul {
+  list-style-type: disc !important;
+  padding-right: 1.5rem !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.rich-text-content ol {
+  list-style-type: decimal !important;
+  padding-right: 1.5rem !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.rich-text-content h1 {
+  font-size: 1.5rem !important;
+  font-weight: 800 !important;
+  margin-top: 1rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.rich-text-content h2 {
+  font-size: 1.25rem !important;
+  font-weight: 700 !important;
+  margin-top: 0.75rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.rich-text-content h3 {
+  font-size: 1.125rem !important;
+  font-weight: 700 !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+.rich-text-content p {
+  margin-bottom: 0.5rem !important;
+}
+
+
+
