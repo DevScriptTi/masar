@@ -46,6 +46,9 @@ import {
   ListFilter,
 } from "lucide-react";
 
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase/config";
+
 export default function StudentCoursePlayerPage({
   params,
 }: {
@@ -72,6 +75,55 @@ export default function StudentCoursePlayerPage({
 
   // Task C: Mobile Sidebar Toggle Drawer State
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // Student Homework Submission details for AI Tutor Context & Chat History Persistence
+  const [currentSubmissionId, setCurrentSubmissionId] = useState<string | undefined>(undefined);
+  const [currentAiEvaluationCache, setCurrentAiEvaluationCache] = useState<any>(undefined);
+  const [currentSubmissionUrls, setCurrentSubmissionUrls] = useState<string[]>([]);
+
+  // Fetch student submission doc for active activity
+  useEffect(() => {
+    if (!user?.uid || !activeActivityId) {
+      setCurrentSubmissionId(undefined);
+      setCurrentAiEvaluationCache(undefined);
+      setCurrentSubmissionUrls([]);
+      return;
+    }
+
+    const fetchCurrentSubmission = async () => {
+      try {
+        const q = query(
+          collection(db, "submissions"),
+          where("studentId", "==", user.uid),
+          where("activityId", "==", activeActivityId),
+          where("type", "==", "assignment")
+        );
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const docSnap = snap.docs[0];
+          const subData: any = docSnap.data();
+          setCurrentSubmissionId(docSnap.id);
+          setCurrentAiEvaluationCache(subData.aiEvaluationCache || null);
+
+          let parsedUrls: string[] = [];
+          if (Array.isArray(subData.contentUrls) && subData.contentUrls.length > 0) {
+            parsedUrls = subData.contentUrls;
+          } else if (subData.content) {
+            parsedUrls = String(subData.content).split(",").map((s) => s.trim()).filter(Boolean);
+          }
+          setCurrentSubmissionUrls(parsedUrls);
+        } else {
+          setCurrentSubmissionId(undefined);
+          setCurrentAiEvaluationCache(undefined);
+          setCurrentSubmissionUrls([]);
+        }
+      } catch (err) {
+        console.error("Error fetching activity submission for AI Tutor:", err);
+      }
+    };
+
+    fetchCurrentSubmission();
+  }, [user?.uid, activeActivityId]);
 
   useEffect(() => {
     if (!courseId || authLoading) return;
@@ -585,6 +637,7 @@ export default function StudentCoursePlayerPage({
                     courseId={courseId}
                     activityId={activeActivity.id!}
                     activityTitle={activeActivity.title}
+                    onSubmissionUrlsChange={setCurrentSubmissionUrls}
                   />
                 )}
 
@@ -760,8 +813,12 @@ export default function StudentCoursePlayerPage({
 
       {/* AI Math Tutor Socratic Floating Widget */}
       <AITutorWidget
+        studentName={studentName}
         lessonTitle={activeActivity?.title}
         lessonSummary={activeActivity?.description}
+        submissionUrls={currentSubmissionUrls}
+        submissionId={currentSubmissionId}
+        aiEvaluationCache={currentAiEvaluationCache}
         latexContent={
           activeActivity?.attachments
             ? activeActivity.attachments

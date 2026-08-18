@@ -96,14 +96,40 @@ body {
   transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-/* Force LTR direction for all LaTeX math rendering */
-.katex, .katex-display, .mathjax, .math {
+/* Task A: Isolate KaTeX math in RTL environments to prevent equation breaking & wrapping bugs */
+.katex {
   direction: ltr !important;
   unicode-bidi: isolate !important;
-  text-align: left;
+  display: inline-block !important;
+  white-space: nowrap !important;
 }
+
+/* Textbook Math Formula Highlight (Sky Blue / Cyan accent for high visibility) */
+.katex .katex-html {
+  color: #38bdf8 !important; /* Tailwind sky-400 */
+  font-weight: 600 !important;
+}
+
+.dark .katex .katex-html {
+  color: #38bdf8 !important;
+}
+
+/* Ensure block math is properly centered, LTR isolated and horizontally scrollable */
 .katex-display {
-  text-align: center;
+  direction: ltr !important;
+  unicode-bidi: isolate !important;
+  text-align: center !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.katex-display .katex {
+  display: block !important;
+  white-space: normal !important;
 }
 
 /* Quill Snow MD3 Theme Overrides */
@@ -230,5 +256,38 @@ body {
   margin-bottom: 0.5rem !important;
 }
 
+/* ==========================================
+   KaTeX RTL Fixes & Textbook Styling
+   ========================================== */
 
+/* 1. Force LTR direction and isolate bidi to prevent math from breaking in Arabic text */
+.katex {
+  direction: ltr !important;
+  unicode-bidi: isolate;
+  white-space: nowrap; /* Prevent line breaks inside inline math */
+  display: inline-block;
+  margin: 0 0.25rem; /* Add slight padding around equations */
+}
+
+/* 2. Style the math equations to stand out (Textbook look for Dark Mode) */
+.katex .katex-html {
+  color: #38bdf8 !important; /* Tailwind sky-400 - bright and readable on dark backgrounds */
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); /* Subtle shadow for depth */
+}
+
+/* 3. Ensure display (block) math equations are centered and scrollable if they are too long */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.75rem 0;
+  margin: 1rem 0;
+  text-align: center;
+  direction: ltr !important;
+}
+
+/* 4. Optional: Highlight strong/bold text to match the textbook aesthetic */
+.prose strong {
+  color: #fbbf24; /* Tailwind amber-400 for important keywords */
+}
 

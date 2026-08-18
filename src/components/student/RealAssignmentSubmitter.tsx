@@ -34,6 +34,7 @@ interface RealAssignmentSubmitterProps {
   courseId: string;
   activityId: string;
   activityTitle: string;
+  onSubmissionUrlsChange?: (urls: string[]) => void;
 }
 
 export function RealAssignmentSubmitter({
@@ -43,6 +44,7 @@ export function RealAssignmentSubmitter({
   courseId,
   activityId,
   activityTitle,
+  onSubmissionUrlsChange,
 }: RealAssignmentSubmitterProps) {
   const [driveLink, setDriveLink] = useState("");
   const [submissionUrls, setSubmissionUrls] = useState<string[]>([]);
@@ -54,6 +56,13 @@ export function RealAssignmentSubmitter({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [activityDoc, setActivityDoc] = useState<any>(null);
+
+  const updateSubmissionUrls = (urls: string[]) => {
+    setSubmissionUrls(urls);
+    if (onSubmissionUrlsChange) {
+      onSubmissionUrlsChange(urls);
+    }
+  };
 
   // Fetch Activity Doc for Deadline and Paused status
   useEffect(() => {
@@ -78,6 +87,26 @@ export function RealAssignmentSubmitter({
   );
   const canResubmit = !!existingSubmission?.canResubmit;
   const isBlocked = (isPaused || isDeadlinePassed) && !canResubmit;
+
+  const triggerPreAnalysis = (subId: string, urls: string[]) => {
+    if (!subId || !urls || urls.length === 0) return;
+    fetch("/api/ai/pre-analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        submissionId: subId,
+        images: urls,
+        lessonContext: activityTitle,
+      }),
+    })
+      .then((res) => res.json())
+      .then((resData) => {
+        if (resData?.aiEvaluationCache) {
+          console.log("⚡ Background Pre-Analysis Ready:", resData.aiEvaluationCache);
+        }
+      })
+      .catch((err) => console.error("Background Pre-Analysis Error:", err));
+  };
 
   // Fetch Existing Submission for this activity
   useEffect(() => {
@@ -105,11 +134,17 @@ export function RealAssignmentSubmitter({
           } else if (data.content) {
             parsedUrls = String(data.content).split(",").map((s) => s.trim()).filter(Boolean);
           }
-          setSubmissionUrls(parsedUrls);
+          updateSubmissionUrls(parsedUrls);
           setDriveLink(data.content || "");
           setNotes(data.notes || "");
+
+          // Trigger background pre-analysis if cache does not exist yet
+          if (!data.aiEvaluationCache && parsedUrls.length > 0) {
+            triggerPreAnalysis(data.id, parsedUrls);
+          }
         } else {
           setExistingSubmission(null);
+          updateSubmissionUrls([]);
         }
       } catch (error) {
         console.error("Error fetching assignment submission:", error);
@@ -140,7 +175,9 @@ export function RealAssignmentSubmitter({
     setIsSubmitting(true);
 
     try {
+      let subId = "";
       if (existingSubmission && existingSubmission.id) {
+        subId = existingSubmission.id;
         // Update Existing Submission
         const docRef = doc(db, "submissions", existingSubmission.id);
         await updateDoc(docRef, {
@@ -177,8 +214,12 @@ export function RealAssignmentSubmitter({
         };
 
         const docRef = await addDoc(collection(db, "submissions"), newSub);
+        subId = docRef.id;
         setExistingSubmission({ id: docRef.id, ...newSub });
       }
+
+      // Non-blocking background trigger for AI Pre-Analysis
+      triggerPreAnalysis(subId, submissionUrls);
 
       setSuccessMsg("تم تسليم الإجابة بنجاح! الإجابة في انتظار تقييم الأستاذ.");
     } catch (error) {
@@ -335,7 +376,7 @@ export function RealAssignmentSubmitter({
         {/* Cloudinary Multi-File Homework Uploader */}
         <HomeworkUploader
           currentUrls={submissionUrls}
-          onUploadSuccess={(urls) => setSubmissionUrls(urls)}
+          onUploadSuccess={(urls) => updateSubmissionUrls(urls)}
         />
 
         <div className="space-y-1.5">
