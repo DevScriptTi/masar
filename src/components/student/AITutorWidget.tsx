@@ -13,6 +13,9 @@ import {
   CornerDownLeft,
   Trash2,
   Pencil,
+  Trophy,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -22,6 +25,7 @@ import "katex/dist/katex.min.css";
 import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { MathInputEngine, MathInputEngineRef } from "./MathInputEngine";
+import { InteractiveExercise } from "./InteractiveExercise";
 
 interface Message {
   id: string;
@@ -102,6 +106,45 @@ export function AITutorWidget({
   const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
   const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
 
+  // Task A: Responsive Expansion & Gamified Exit States
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [showRewardModal, setShowRewardModal] = useState(false);
+  const [evaluationStats, setEvaluationStats] = useState<{
+    newSkills: number;
+    mistakesResolved: number;
+    totalSkills: number;
+  } | null>(null);
+
+  // Task A & B: Track MathLive Virtual Keyboard Height & Visibility
+  const [vkbHeight, setVkbHeight] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const updateKeyboardHeight = () => {
+      const vkb = (window as any).mathVirtualKeyboard;
+      if (vkb && vkb.visible) {
+        const height = vkb.boundingRect?.height || 300;
+        setVkbHeight(height);
+      } else {
+        setVkbHeight(0);
+      }
+    };
+
+    const vkb = (window as any).mathVirtualKeyboard;
+    if (vkb) {
+      vkb.addEventListener("geometrychange", updateKeyboardHeight);
+      updateKeyboardHeight();
+    }
+
+    return () => {
+      if (vkb) {
+        vkb.removeEventListener("geometrychange", updateKeyboardHeight);
+      }
+    };
+  }, []);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mathEngineRef = useRef<MathInputEngineRef>(null);
 
@@ -110,9 +153,8 @@ export function AITutorWidget({
 
   // Dynamic Welcome Message
   const studentDisplayName = studentName && studentName.trim() ? studentName : "التلميذ العزيز";
-  const initialGreeting = `مرحباً بك يا ${studentDisplayName}! أنا مساعدك الذكي لمادة الرياضيات في درس "${
-    lessonTitle || "الرياضيات"
-  }". كيف يمكنني مساعدتك اليوم؟ [اقتراح: يرجى شرح فكرة الدرس بالتفصيل] [اقتراح: مراجعة حلي المرفوع]`;
+  const initialGreeting = `مرحباً بك يا ${studentDisplayName}! أنا مساعدك الذكي لمادة الرياضيات في درس "${lessonTitle || "الرياضيات"
+    }". كيف يمكنني مساعدتك اليوم؟ [اقتراح: يرجى شرح فكرة الدرس بالتفصيل] [اقتراح: مراجعة حلي المرفوع]`;
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -155,7 +197,7 @@ export function AITutorWidget({
     if (isOpen) {
       scrollToBottom();
     }
-  }, [messages, isOpen]);
+  }, [messages, isOpen, vkbHeight]);
 
   // Save Chat History to Firestore helper
   const persistChatHistory = async (newMessages: Message[]) => {
@@ -171,7 +213,7 @@ export function AITutorWidget({
     }
   };
 
-  // Task B: High-End Textbook Markdown Components Renderer Override
+  // High-End Textbook Markdown Components Renderer Override
   const renderTextbookComponents = {
     h1: ({ children }: any) => (
       <h1 className="text-base font-extrabold text-amber-500 dark:text-amber-400 mt-3 mb-1.5 flex items-center gap-1.5 border-b border-amber-500/20 pb-1">
@@ -208,13 +250,37 @@ export function AITutorWidget({
         {children}
       </blockquote>
     ),
-    code: ({ children }: any) => (
-      <code className="px-1.5 py-0.5 rounded-lg bg-surface-variant text-primary font-mono text-[11px] dir-ltr inline-block">
-        {children}
-      </code>
-    ),
+    code: ({ node, inline, className, children, ...props }: any) => {
+      const match = /language-(\w+)/.exec(className || "");
+      const language = match ? match[1] : "";
+
+      // Intercept the Generative UI JSON block (e.g. ```exercise ... ```)
+      if (!inline && (language === "exercise" || language === "json-exercise")) {
+        try {
+          const rawContent = String(children).replace(/\n$/, "").trim();
+          const data = JSON.parse(rawContent);
+          return (
+            <InteractiveExercise
+              data={data}
+              onSuccess={(msg) => handleAutoSubmit(msg)}
+            />
+          );
+        } catch (e) {
+          console.error("Failed to parse interactive exercise JSON", e);
+          return null;
+        }
+      }
+
+      return (
+        <code
+          className="px-1.5 py-0.5 rounded-lg bg-surface-variant text-primary font-mono text-[11px] dir-ltr inline-block"
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    },
     a: ({ href, children, ...props }: any) => {
-      // Intercept #image-X or image-X or imgX links
       const imageRefMatch =
         href &&
         (href.match(/#(?:image|img)-?(\d+)/i) ||
@@ -278,7 +344,55 @@ export function AITutorWidget({
     },
   };
 
-  // Handle Edit and Rerun logic
+  // Task B: STRICT Guarded Gamified End Session Evaluation Function
+  const handleEndSession = async () => {
+    if (messages.length < 2 || isEvaluating) return;
+
+    // Strict Guard: Prevent evaluation if explicit studentId is missing
+    if (!studentId || studentId.trim() === "") {
+      console.error("Critical Error: studentId is undefined or empty. Cannot update Master Profile.");
+      alert("عذراً، حدث خطأ في التعرف على حسابك. يرجى التأكد من تسجيل الدخول.");
+      return;
+    }
+
+    setIsEvaluating(true);
+
+    try {
+      const res = await fetch("/api/ai/update-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: studentId, // Strictly enforce the real studentId
+          studentId: studentId,
+          messages,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const delta = data.delta || {};
+        const updatedProfile = data.updatedProfile || {};
+
+        const newSkillsCount = delta.newSkillTags ? Object.keys(delta.newSkillTags).length : 0;
+        const resolvedCount = Array.isArray(delta.resolvedMistakes) ? delta.resolvedMistakes.length : 0;
+        const totalSkillsCount = updatedProfile.skillTags ? Object.keys(updatedProfile.skillTags).length : 0;
+
+        setEvaluationStats({
+          newSkills: newSkillsCount,
+          mistakesResolved: resolvedCount,
+          totalSkills: totalSkillsCount,
+        });
+        setShowRewardModal(true);
+      } else {
+        console.warn("Update profile API returned non-ok status:", res.status);
+      }
+    } catch (error) {
+      console.error("Evaluation session end error:", error);
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
   const handleEditMessage = (index: number, content: string) => {
     if (isLoading) return;
 
@@ -296,7 +410,6 @@ export function AITutorWidget({
     }, 50);
   };
 
-  // MathLive executeCommand helper for Scratchpad toolbar
   const handleInsertMathToBuilder = (snippet: string) => {
     if (mathEngineRef.current) {
       mathEngineRef.current.executeCommand(["insert", snippet]);
@@ -304,7 +417,6 @@ export function AITutorWidget({
     }
   };
 
-  // Insert Scratchpad visual LaTeX formula into main Textarea cursor position
   const handleInsertScratchpadToText = () => {
     const mathVal = scratchpadMath.trim();
     if (!mathVal) return;
@@ -337,7 +449,6 @@ export function AITutorWidget({
     setIsScratchpadOpen(false);
   };
 
-  // Optimized Payload function (forceVision controls whether heavy images are sent)
   const sendPayload = async (
     userPromptText: string,
     customMessages: Message[],
@@ -436,7 +547,20 @@ export function AITutorWidget({
     await sendPayload(sendText, newMessages, false);
   };
 
-  // Smart Chip Click Handler
+  const handleAutoSubmit = async (autoText: string) => {
+    if (isLoading || !autoText.trim()) return;
+
+    const userMsg: Message = {
+      id: String(Date.now()),
+      role: "user",
+      content: autoText.trim(),
+    };
+
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    await sendPayload(autoText.trim(), newMessages, false);
+  };
+
   const handleChipClick = async (chipText: string) => {
     if (isLoading || !chipText.trim()) return;
 
@@ -459,7 +583,6 @@ export function AITutorWidget({
     await sendPayload(chipText.trim(), newMessages, useVision);
   };
 
-  // Fast Initial Review vs Fallback Vision Trigger
   const handleEvaluateSubmission = async (explicitVisionRequest = false) => {
     if (isLoading || imagesToEvaluate.length === 0) return;
 
@@ -481,12 +604,11 @@ export function AITutorWidget({
     await sendPayload(evalMsgText, newMessages, useVision);
   };
 
-  // Find last assistant message index for showing Smart Chips
   const lastAssistantIndex = messages.map((m) => m.role).lastIndexOf("assistant");
 
   return (
     <div dir="rtl">
-      {/* Floating Action Button (FAB) at Bottom-Left */}
+      {/* Floating Action Button */}
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
@@ -504,9 +626,14 @@ export function AITutorWidget({
         )}
       </button>
 
-      {/* Sleek Floating MD3 Chat Window */}
+      {/* Chat Window */}
       {isOpen && (
-        <div className="fixed bottom-24 left-6 z-40 w-80 sm:w-96 h-[590px] max-h-[86vh] bg-surface border border-outline/20 rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fadeIn backdrop-blur-md">
+        <div
+          className={`fixed z-50 flex flex-col bg-surface border-outline/20 shadow-2xl transition-all duration-300 ease-in-out backdrop-blur-md overflow-hidden animate-fadeIn ${isExpanded
+            ? "inset-0 w-full h-full rounded-none border-0"
+            : "inset-0 w-full h-full rounded-none sm:inset-auto sm:bottom-24 sm:left-6 sm:w-96 sm:h-[590px] sm:max-h-[86vh] sm:rounded-3xl sm:border"
+            }`}
+        >
           {/* Header */}
           <div className="p-4 bg-primary/10 border-b border-outline/15 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -518,22 +645,56 @@ export function AITutorWidget({
                   <span>المساعد الذكي للدرس</span>
                   <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 </h3>
-                <p className="text-[10px] font-bold text-on-surface-variant truncate max-w-[170px]">
+                <p className="text-[10px] font-bold text-on-surface-variant truncate max-w-[140px]">
                   {lessonTitle || "الرياضيات"}
                 </p>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              className="p-2 rounded-full text-on-surface-variant hover:bg-surface-variant/50 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleEndSession}
+                disabled={isEvaluating || messages.length < 2}
+                title="إنهاء الدرس وتقييم مستواي التراكمي"
+                className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-[11px] font-extrabold shadow-2xs transition-all disabled:opacity-50 flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed shrink-0 active:scale-95"
+              >
+                {isEvaluating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>تقييم...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trophy className="w-3.5 h-3.5 text-amber-300" />
+                    <span>تقييم المستوي ✨</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="hidden sm:flex items-center justify-center p-1.5 rounded-full text-on-surface-variant hover:bg-surface-variant/50 transition-colors"
+                title={isExpanded ? "تصغير النافذة" : "تكبير النافذة"}
+              >
+                {isExpanded ? (
+                  <Minimize2 className="w-4 h-4" />
+                ) : (
+                  <Maximize2 className="w-4 h-4" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="p-1.5 rounded-full text-on-surface-variant hover:bg-surface-variant/50 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
-          {/* Sub-Header: Fast Review & Vision Action Buttons */}
           {imagesToEvaluate.length > 0 && (
             <div className="px-4 py-2 bg-surface-variant/30 border-b border-outline/10 flex items-center justify-between gap-2">
               <span className="text-[11px] font-bold text-on-surface-variant flex items-center gap-1">
@@ -568,7 +729,7 @@ export function AITutorWidget({
             </div>
           )}
 
-          {/* Chat Messages Body */}
+          {/* Chat Messages */}
           <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-background/40">
             {messages.map((msg, idx) => {
               const isUser = msg.role === "user";
@@ -583,13 +744,11 @@ export function AITutorWidget({
                   className={`flex flex-col ${isUser ? "items-start" : "items-end"} space-y-2 group`}
                 >
                   <div
-                    className={`max-w-[90%] p-3.5 rounded-2xl text-xs font-medium leading-relaxed shadow-2xs ${
-                      isUser
-                        ? "bg-primary text-on-primary rounded-tr-xs"
-                        : "bg-surface border border-outline/15 text-on-surface rounded-tl-xs prose prose-invert max-w-none"
-                    }`}
+                    className={`max-w-[90%] p-3.5 rounded-2xl text-xs font-medium leading-relaxed shadow-2xs ${isUser
+                      ? "bg-primary text-on-primary rounded-tr-xs"
+                      : "bg-surface border border-outline/15 text-on-surface rounded-tl-xs prose prose-invert max-w-none"
+                      }`}
                   >
-                    {/* Render Markdown & KaTeX formulas with Textbook Typography Override */}
                     <ReactMarkdown
                       remarkPlugins={[remarkMath]}
                       rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
@@ -598,7 +757,6 @@ export function AITutorWidget({
                       {cleanContent}
                     </ReactMarkdown>
 
-                    {/* Edit and Rerun Button on User Message Bubbles */}
                     {isUser && (
                       <div className="flex items-center justify-end pt-1.5 border-t border-on-primary/15 mt-2">
                         <button
@@ -615,7 +773,6 @@ export function AITutorWidget({
                     )}
                   </div>
 
-                  {/* Render Smart Reply Suggestion Chips with KaTeX Math support */}
                   {isLastAssistantMsg && suggestions.length > 0 && (
                     <div className="flex flex-wrap gap-2 pt-1 animate-fadeIn">
                       {suggestions.map((chipText, chipIdx) => (
@@ -656,7 +813,7 @@ export function AITutorWidget({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Visual Math Scratchpad Drawer Component */}
+          {/* Math Scratchpad */}
           {isScratchpadOpen && (
             <div className="p-3 bg-surface-variant/40 border-t border-outline/15 space-y-2 animate-slideUp">
               <div className="flex items-center justify-between pb-1">
@@ -673,7 +830,6 @@ export function AITutorWidget({
                 </button>
               </div>
 
-              {/* Visual MathLive Field with math-virtual-keyboard-policy="none" */}
               <MathInputEngine
                 ref={mathEngineRef}
                 value={scratchpadMath}
@@ -682,7 +838,6 @@ export function AITutorWidget({
                 disabled={isLoading}
               />
 
-              {/* Baccalaureate Math Toolbar Snippet Buttons */}
               <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto pr-0.5 pt-1">
                 {BAC_MATH_SNIPPETS.map((item, idx) => (
                   <button
@@ -697,7 +852,6 @@ export function AITutorWidget({
                 ))}
               </div>
 
-              {/* Scratchpad Action Buttons */}
               <div className="flex items-center justify-between pt-1 border-t border-outline/10">
                 <button
                   type="button"
@@ -726,7 +880,7 @@ export function AITutorWidget({
             </div>
           )}
 
-          {/* Real-Time Live Preview Overlay (Renders while student is typing in textarea) */}
+          {/* Live Preview Overlay */}
           {input.trim().length > 0 && (
             <div className="px-3 py-2 bg-primary/5 border-t border-primary/20 animate-fadeIn space-y-1">
               <div className="flex items-center justify-between">
@@ -738,7 +892,6 @@ export function AITutorWidget({
                   الشكل النهائي المعروض للتلميذ
                 </span>
               </div>
-
               <div className="p-2.5 rounded-xl bg-surface border border-outline/15 text-xs text-on-surface leading-relaxed max-h-28 overflow-y-auto font-medium shadow-2xs">
                 <ReactMarkdown
                   remarkPlugins={[remarkMath]}
@@ -751,24 +904,33 @@ export function AITutorWidget({
             </div>
           )}
 
-          {/* Footer Input Bar: Standard Arabic Textarea + Math Scratchpad Toggle Button */}
+          {/* Chat Input Area */}
           <form
             onSubmit={handleSend}
-            className="p-3 bg-surface border-t border-outline/15 flex flex-col gap-2"
+            className="p-3 bg-surface border-t border-outline/15 flex flex-col gap-2 transition-all duration-300"
+            style={{ paddingBottom: vkbHeight > 0 ? `${vkbHeight + 12}px` : undefined }}
           >
             <div className="flex items-center justify-between px-1">
               <button
                 type="button"
                 onClick={() => setIsScratchpadOpen((prev) => !prev)}
                 title="فتح مسودة ابتكار المعادلة الرياضية التفاعلية"
-                className={`px-3 py-1 rounded-xl flex items-center gap-1.5 text-[11px] font-extrabold transition-all border border-outline/15 cursor-pointer ${
-                  isScratchpadOpen
-                    ? "bg-primary text-on-primary border-primary shadow-xs"
-                    : "bg-surface-variant/40 text-on-surface-variant hover:bg-surface-variant hover:text-primary"
-                }`}
+                className={`px-3 py-1 rounded-xl flex items-center gap-1.5 text-[11px] font-extrabold transition-all border border-outline/15 cursor-pointer ${isScratchpadOpen
+                  ? "bg-primary text-on-primary border-primary shadow-xs"
+                  : "bg-surface-variant/40 text-on-surface-variant hover:bg-surface-variant hover:text-primary"
+                  }`}
               >
                 <Calculator className="w-3.5 h-3.5" />
                 <span>مسودة معادلة تفاعلية ∑</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleEndSession}
+                disabled={isEvaluating || messages.length < 2}
+                className="text-[10px] font-bold text-emerald-500 hover:underline disabled:opacity-40 disabled:no-underline cursor-pointer"
+              >
+                {isEvaluating ? "جاري التقييم..." : "إنهاء الدرس وتقييم المستوي 🏆"}
               </button>
             </div>
 
@@ -801,7 +963,7 @@ export function AITutorWidget({
         </div>
       )}
 
-      {/* Lightbox Image Preview Modal */}
+      {/* Lightbox Modal */}
       {lightboxImageUrl && (
         <div
           className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn"
@@ -825,6 +987,68 @@ export function AITutorWidget({
               alt="معاينة الصورة"
               className="max-h-[82vh] w-auto object-contain rounded-2xl"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Reward Modal */}
+      {showRewardModal && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+          dir="rtl"
+        >
+          <div className="bg-surface border border-outline/20 p-6 rounded-3xl shadow-2xl max-w-sm w-full text-center transform scale-100 animate-slideUp space-y-4">
+            <div className="text-5xl animate-bounce">🌟</div>
+
+            <h3 className="text-lg font-extrabold text-on-surface">
+              أحسنت العمل يا {studentDisplayName}!
+            </h3>
+
+            <p className="text-xs font-medium text-on-surface-variant leading-relaxed">
+              لقد تم تحليل إجاباتك بنجاح وتحديث ملفك البيداغوجي والتراكمي في منصة "مسار".
+            </p>
+
+            <div className="flex justify-center gap-2 py-2">
+              <div className="bg-primary/10 border border-primary/20 p-3 rounded-2xl text-center flex-1">
+                <div className="text-2xl font-extrabold text-primary">
+                  +{evaluationStats?.newSkills || 1}
+                </div>
+                <div className="text-[10px] font-bold text-on-surface-variant">
+                  مهارات جديدة
+                </div>
+              </div>
+
+              {evaluationStats && evaluationStats.mistakesResolved > 0 && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-2xl text-center flex-1">
+                  <div className="text-2xl font-extrabold text-emerald-500">
+                    {evaluationStats.mistakesResolved}
+                  </div>
+                  <div className="text-[10px] font-bold text-on-surface-variant">
+                    أخطاء متجاوزة
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-2xl text-center flex-1">
+                <div className="text-2xl font-extrabold text-amber-500">
+                  {evaluationStats?.totalSkills || 1}
+                </div>
+                <div className="text-[10px] font-bold text-on-surface-variant">
+                  إجمالي المهارات
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowRewardModal(false);
+                setIsOpen(false);
+              }}
+              className="w-full py-2.5 px-4 rounded-xl bg-primary text-on-primary font-extrabold text-xs shadow-md hover:bg-primary/90 transition-all cursor-pointer"
+            >
+              إغلاق ومتابعة التعلم ✨
+            </button>
           </div>
         </div>
       )}

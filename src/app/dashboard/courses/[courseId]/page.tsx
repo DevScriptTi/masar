@@ -352,9 +352,8 @@ export default function StudentCoursePlayerPage({
                     {moduleActivities.length}
                   </span>
                   <ChevronDown
-                    className={`w-4 h-4 text-on-surface-variant transition-transform duration-200 ${
-                      isExpanded ? "rotate-180" : ""
-                    }`}
+                    className={`w-4 h-4 text-on-surface-variant transition-transform duration-200 ${isExpanded ? "rotate-180" : ""
+                      }`}
                   />
                 </div>
               </button>
@@ -379,11 +378,10 @@ export default function StudentCoursePlayerPage({
                             setIsMobileSidebarOpen(false);
                             window.scrollTo({ top: 0, behavior: "smooth" });
                           }}
-                          className={`w-full p-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between gap-3 text-right ${
-                            isActive
-                              ? "bg-primary text-on-primary shadow-xs"
-                              : "bg-surface-variant/20 text-on-surface hover:bg-surface-variant/50 border border-outline/10"
-                          }`}
+                          className={`w-full p-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between gap-3 text-right ${isActive
+                            ? "bg-primary text-on-primary shadow-xs"
+                            : "bg-surface-variant/20 text-on-surface hover:bg-surface-variant/50 border border-outline/10"
+                            }`}
                         >
                           <div className="flex items-center gap-2 truncate">
                             {getActivityIcon(act.type)}
@@ -469,8 +467,8 @@ export default function StudentCoursePlayerPage({
                         {activeActivity.type === "practice"
                           ? "تطبيق وتمرين"
                           : activeActivity.type === "exam"
-                          ? "امتحان وتقييم"
-                          : "درس نظري"}
+                            ? "امتحان وتقييم"
+                            : "درس نظري"}
                       </span>
                     </span>
 
@@ -593,11 +591,10 @@ export default function StudentCoursePlayerPage({
                             <div className="flex items-center justify-between gap-3">
                               <div className="flex items-center gap-3 min-w-0">
                                 <div
-                                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                                    isVideo
-                                      ? "bg-primary/10 text-primary group-hover:bg-primary group-hover:text-on-primary"
-                                      : "bg-secondary/10 text-secondary group-hover:bg-secondary group-hover:text-on-secondary"
-                                  }`}
+                                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${isVideo
+                                    ? "bg-primary/10 text-primary group-hover:bg-primary group-hover:text-on-primary"
+                                    : "bg-secondary/10 text-secondary group-hover:bg-secondary group-hover:text-on-secondary"
+                                    }`}
                                 >
                                   {isVideo ? <Video className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
                                 </div>
@@ -707,11 +704,10 @@ export default function StudentCoursePlayerPage({
           dir="rtl"
         >
           <div
-            className={`relative bg-surface overflow-hidden shadow-2xl transition-all duration-300 flex flex-col border border-outline/20 ${
-              isFullscreen
-                ? "w-full h-full rounded-none fixed inset-0 z-[200]"
-                : "w-full max-w-5xl aspect-video rounded-2xl sm:w-full sm:h-full sm:rounded-none sm:fixed sm:inset-0"
-            }`}
+            className={`relative bg-surface overflow-hidden shadow-2xl transition-all duration-300 flex flex-col border border-outline/20 ${isFullscreen
+              ? "w-full h-full rounded-none fixed inset-0 z-[200]"
+              : "w-full max-w-5xl aspect-video rounded-2xl sm:w-full sm:h-full sm:rounded-none sm:fixed sm:inset-0"
+              }`}
           >
             <div className="p-3.5 bg-surface-variant/80 flex items-center justify-between border-b border-outline/20 shrink-0">
               <span className="font-extrabold text-xs sm:text-sm text-on-surface flex items-center gap-2">
@@ -763,11 +759,10 @@ export default function StudentCoursePlayerPage({
           dir="rtl"
         >
           <div
-            className={`relative bg-surface overflow-hidden shadow-2xl transition-all duration-300 flex flex-col border border-outline/20 ${
-              isFullscreen
-                ? "w-full h-full rounded-none fixed inset-0 z-[200]"
-                : "w-full max-w-5xl h-[85vh] rounded-2xl sm:w-full sm:h-full sm:rounded-none sm:fixed sm:inset-0"
-            }`}
+            className={`relative bg-surface overflow-hidden shadow-2xl transition-all duration-300 flex flex-col border border-outline/20 ${isFullscreen
+              ? "w-full h-full rounded-none fixed inset-0 z-[200]"
+              : "w-full max-w-5xl h-[85vh] rounded-2xl sm:w-full sm:h-full sm:rounded-none sm:fixed sm:inset-0"
+              }`}
           >
             <div className="p-3.5 bg-surface-variant/80 flex items-center justify-between border-b border-outline/20 shrink-0">
               <span className="font-extrabold text-xs sm:text-sm text-on-surface flex items-center gap-2">
@@ -812,7 +807,9 @@ export default function StudentCoursePlayerPage({
       )}
 
       {/* AI Math Tutor Socratic Floating Widget */}
+      {/* AI Math Tutor Socratic Floating Widget */}
       <AITutorWidget
+        studentId={user?.uid} // <--- السطر الحاسم لربط الذاكرة بالمعرف الحقيقي للتلميذ
         studentName={studentName}
         lessonTitle={activeActivity?.title}
         lessonSummary={activeActivity?.description}
@@ -822,9 +819,9 @@ export default function StudentCoursePlayerPage({
         latexContent={
           activeActivity?.attachments
             ? activeActivity.attachments
-                .map((item) => (typeof item === "string" ? "" : item.latexContent || ""))
-                .filter(Boolean)
-                .join("\n\n")
+              .map((item) => (typeof item === "string" ? "" : item.latexContent || ""))
+              .filter(Boolean)
+              .join("\n\n")
             : ""
         }
       />

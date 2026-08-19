@@ -90,7 +90,7 @@ export async function POST(req: Request) {
       (data && (data.userId || data.studentId)) ||
       "";
 
-    // Task C: Non-blocking execution for Master Profile fetch
+    // Non-blocking execution for Master Profile fetch
     let masterProfile = null;
     if (targetUserId) {
       try {
@@ -140,7 +140,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // Strict System Prompt incorporating Pre-Analysis Cache, Master Profile, Socratic Pacing, Student Name, Smart Chips & Textbook Formatting
+    // Strict System Prompt incorporating Pre-Analysis Cache, Master Profile, Generative UI, Socratic Pacing & Textbook Formatting
     let systemPrompt = `أنت مساعد ذكي لسقراطي في منصة "مسار". التلميذ الذي تتحدث معه اسمه "${studentDisplayName}".
 
 القواعد الصارمة للرد:
@@ -150,6 +150,25 @@ export async function POST(req: Request) {
 4. الإشارة للصور: عند الإشارة إلى صورة من صور التلميذ، استخدم هذا التنسيق الحرفي فقط: [الصورة X](#image-X) حيث X هو رقم الصورة (مثل #image-1 للصورة الأولى، #image-2 للصورة الثانية...). لا تضع أفكاراً أو روابط وهمية بديلة.
 5. الردود المقترحة (Smart Chips): في نهاية كل رد لك، يجب أن تقترح على التلميذ 2 أو 3 خيارات قصيرة وذكية للرد. اكتب كل خيار في سطر جديد بالصيغة التالية حصراً: [اقتراح: نص الرد المقترح هنا].
 6. التعامل مع أكواد LaTeX المرفقة: إذا احتوى المرجع أو رسالة المستخدم على كود LaTeX كامل (مستند بحزم وديباجة مثل \\documentclass أو \\usepackage أو tcolorbox)، قم باستخلاص المفاهيم الرياضية، التمارين والحلول النموذجية منه فقط. لا تقم أبداً بإرجاع أو طباعة أوامر الديباجة في ردودك للتلميذ.
+7. ميزة التدريبات التفاعلية (Generative UI) - [أولوية قصوى وشرط إجباري]:
+أنت تمتلك قدرة خارقة على توليد تمارين تفاعلية تظهر كبطاقات مرئية داخل الدردشة.
+عندما يطلب منك التلميذ تمريناً، أو عندما تختبر فهمه في (جمع الكسور)، يُمنع منعاً باتاً كتابة التمرين الرياضي كنص عادي أو باستخدام LaTeX العادي.
+يجب عليك وجوباً توليد التمرين حصرياً باستخدام كتلة كود (Code Block) من نوع \`exercise\` تحتوي على كائن JSON دقيق.
+
+مثال إجباري للصيغة التي يجب أن تلتزم بها حرفياً (مع تغيير الأرقام):
+\`\`\`exercise
+{
+  "type": "fraction_addition",
+  "question": "\\\\frac{2}{7} + \\\\frac{3}{7}",
+  "denominator": 7,
+  "correctNumerator": 5
+}
+\`\`\`
+
+قواعد الإعدام البرمجي الصارمة (Strict Rules):
+1. إياك أن تكتب المعادلة المطلوبة من التلميذ حلها خارج كائن الـ JSON المذكور أعلاه.
+2. يجب أن يكون الـ JSON صالحاً برمجياً (Valid JSON).
+3. يمكنك كتابة سطر تشجيعي واحد فقط قبل الكتلة، مثلاً: "ممتاز، لنجرب حل هذا التمرين التفاعلي:" ثم تدرج كتلة الكود مباشرة دون أي إضافات أو شروحات أخرى.
 
 سياق الدرس الحالي: "${lessonContext || "الرياضيات"}"
 
@@ -157,7 +176,7 @@ export async function POST(req: Request) {
 ${lessonSummary && String(lessonSummary).trim() ? lessonSummary : "محتوى وقوانين درس الرياضيات المعتمد."}
 --- نهاية ملخص الدرس الرسمي ---`;
 
-    // Task B: Inject Master Profile (Cumulative Learning Memory) into System Prompt
+    // Inject Master Profile (Cumulative Learning Memory) into System Prompt
     if (
       masterProfile &&
       ((masterProfile.skillTags && Object.keys(masterProfile.skillTags).length > 0) ||
@@ -189,7 +208,7 @@ ${aggregatedLatex}
 
     // Inject Vision Instructions ONLY if forceVision requested image attachment
     if (shouldIncludeImages) {
-      systemPrompt += `\n\n7. صور حل التلميذ المرفقة: لقد طلب التلميذ مراجعة صور إجابته بصرياً المرفقة (${imagesPayload.length} صورة). عند الإشارة إلى أي صورة أو خطأ فيها، استخدم التنسيق الحرفي الحصري التالي فقط: [الصورة X](#image-X) حيث X هو رقم الصورة الحقيقي (من 1 إلى ${imagesPayload.length}).`;
+      systemPrompt += `\n\n8. صور حل التلميذ المرفقة: لقد طلب التلميذ مراجعة صور إجابته بصرياً المرفقة (${imagesPayload.length} صورة). عند الإشارة إلى أي صورة أو خطأ فيها، استخدم التنسيق الحرفي الحصري التالي فقط: [الصورة X](#image-X) حيث X هو رقم الصورة الحقيقي (من 1 إلى ${imagesPayload.length}).`;
     }
 
     // Fast Payload vs Multimodal Vision Payload
