@@ -53,31 +53,28 @@ export default function LoginPage() {
         router.push("/dashboard");
       }
     } catch (error: any) {
-      console.error("Login error:", error);
-      const errorCode = error?.code || "";
+      console.error("Login error:", error?.code || error?.message);
+      // Map Firebase error codes to user-friendly Arabic messages
+      let errorMessage = "حدث خطأ أثناء تسجيل الدخول. يرجى المحاولة لاحقاً.";
 
-      switch (errorCode) {
-        case "auth/invalid-credential":
-        case "auth/user-not-found":
-        case "auth/wrong-password":
-          setErrorMessage("البريد الإلكتروني أو كلمة المرور غير صحيحة.");
-          break;
-        case "auth/invalid-email":
-          setErrorMessage("صيغة البريد الإلكتروني غير صحيحة.");
-          break;
-        case "auth/too-many-requests":
-          setErrorMessage("تم حظر المحاولات المؤقتة لكثرة المحاولات الفاشلة. يرجى المحاولة لاحقاً.");
-          break;
-        case "auth/network-request-failed":
-          setErrorMessage("خطأ في الاتصال بالشبكة. يرجى التثبت من اتصالك بالإنترنت.");
-          break;
-        default:
-          setErrorMessage(error?.message || "حدث خطأ أثناء تسجيل الدخول. يرجى المحاولة مرة أخرى.");
-          break;
+      if (
+        error?.code === "auth/invalid-credential" ||
+        error?.code === "auth/user-not-found" ||
+        error?.code === "auth/wrong-password"
+      ) {
+        errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
+      } else if (error?.code === "auth/too-many-requests") {
+        errorMessage = "تم حظر الحساب مؤقتاً بسبب محاولات كثيرة خاطئة. يرجى المحاولة لاحقاً.";
+      } else if (error?.code === "auth/invalid-email") {
+        errorMessage = "صيغة البريد الإلكتروني غير صحيحة.";
+      } else if (error?.code === "auth/network-request-failed") {
+        errorMessage = "خطأ في الاتصال بالشبكة. يرجى التثبت من اتصالك بالإنترنت.";
       }
+
+      // Set the error state so the UI displays it gracefully
+      setErrorMessage(errorMessage);
     } finally {
-      // STRICT RULE: Loading state MUST be reset in finally block
-      setLoading(false);
+      setLoading(false); // Ensure loading state is reset
     }
   };
 

@@ -69,6 +69,7 @@ export interface ActivityDoc {
   excludedStudentIds?: string[];
   deadline?: string;
   isSubmissionsPaused?: boolean;
+  hiddenTeacherDirectives?: string;
   createdAt?: any;
 }
 

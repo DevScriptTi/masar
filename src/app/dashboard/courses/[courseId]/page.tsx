@@ -402,6 +402,8 @@ export default function StudentCoursePlayerPage({
     );
   };
 
+  console.log("🔥 FRONTEND DEBUG 1 (Page): activeActivity directives =", activeActivity?.hiddenTeacherDirectives);
+
   return (
     <div className="min-h-screen bg-background text-on-background font-sans selection:bg-primary/20" dir="rtl">
       {/* Top Navbar Navigation */}
@@ -816,6 +818,7 @@ export default function StudentCoursePlayerPage({
         submissionUrls={currentSubmissionUrls}
         submissionId={currentSubmissionId}
         aiEvaluationCache={currentAiEvaluationCache}
+        hiddenTeacherDirectives={activeActivity?.hiddenTeacherDirectives}
         latexContent={
           activeActivity?.attachments
             ? activeActivity.attachments

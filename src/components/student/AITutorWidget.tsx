@@ -43,6 +43,7 @@ export interface AITutorWidgetProps {
   latexContent?: string;
   aiEvaluationCache?: any;
   submissionId?: string;
+  hiddenTeacherDirectives?: string;
 }
 
 // Baccalaureate Math Snippets using MathLive Placeholders (#0, #?)
@@ -98,6 +99,7 @@ export function AITutorWidget({
   latexContent = "",
   aiEvaluationCache,
   submissionId,
+  hiddenTeacherDirectives = "",
 }: AITutorWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
@@ -106,7 +108,8 @@ export function AITutorWidget({
   const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
   const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
 
-  // Task A: Responsive Expansion & Gamified Exit States
+  // Task A: Lazy Loading & Expansion States
+  const [displayLimit, setDisplayLimit] = useState(15);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [showRewardModal, setShowRewardModal] = useState(false);
@@ -393,6 +396,50 @@ export function AITutorWidget({
     }
   };
 
+  // Task B: Smart Clear Chat & Context Contagion Prevention Function
+  const handleClearChat = async () => {
+    if (messages.length <= 1 || isLoading) return;
+
+    const confirmWipe = window.confirm(
+      "هل أنت متأكد أنك تريد مسح الدردشة وبدء جلسة جديدة؟ سيتم حفظ تقدمك أولاً."
+    );
+    if (!confirmWipe) return;
+
+    setIsLoading(true);
+
+    try {
+      // 1. Silently update context (Master Profile) if there's enough data
+      if (messages.length > 2 && studentId) {
+        await fetch("/api/ai/update-profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: studentId,
+            studentId: studentId,
+            messages,
+          }),
+        }).catch((err) => console.warn("Silent profile update failed:", err));
+      }
+
+      // 2. Nuke Firestore chat history for this submission
+      if (submissionId) {
+        const subRef = doc(db, "submissions", submissionId);
+        await updateDoc(subRef, {
+          chatHistory: [messages[0]], // Keep only the initial greeting
+          chatUpdatedAt: serverTimestamp(),
+        });
+      }
+
+      // 3. Reset local state
+      setMessages([messages[0]]);
+      setDisplayLimit(15);
+    } catch (error) {
+      console.error("Error clearing chat:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleEditMessage = (index: number, content: string) => {
     if (isLoading) return;
 
@@ -457,6 +504,7 @@ export function AITutorWidget({
     setIsLoading(true);
 
     try {
+      console.log("🔥 FRONTEND DEBUG 2 (Widget): Directives prop value =", hiddenTeacherDirectives);
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -472,6 +520,7 @@ export function AITutorWidget({
           forceVision: forceVision,
           uploadedImages: forceVision ? imagesToEvaluate : [],
           studentImages: forceVision ? imagesToEvaluate : [],
+          hiddenTeacherDirectives: hiddenTeacherDirectives || "",
         }),
       });
 
@@ -605,6 +654,7 @@ export function AITutorWidget({
   };
 
   const lastAssistantIndex = messages.map((m) => m.role).lastIndexOf("assistant");
+  const displayedMessages = messages.slice(-displayLimit);
 
   return (
     <div dir="rtl">
@@ -672,6 +722,17 @@ export function AITutorWidget({
                 )}
               </button>
 
+              {/* Task C: Clear Chat Button */}
+              <button
+                type="button"
+                onClick={handleClearChat}
+                disabled={isLoading || messages.length <= 1}
+                className="hidden sm:flex items-center justify-center p-1.5 rounded-full text-error hover:bg-error/10 transition-colors disabled:opacity-30 cursor-pointer"
+                title="مسح الدردشة وبدء جلسة جديدة"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsExpanded(!isExpanded)}
@@ -729,11 +790,20 @@ export function AITutorWidget({
             </div>
           )}
 
-          {/* Chat Messages */}
-          <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-background/40">
-            {messages.map((msg, idx) => {
+          {/* Chat Messages (Lazy Loaded / Paginated) */}
+          <div
+            className="flex-1 p-4 overflow-y-auto space-y-4 bg-background/40"
+            onScroll={(e) => {
+              const target = e.target as HTMLDivElement;
+              if (target.scrollTop === 0 && displayLimit < messages.length) {
+                setDisplayLimit((prev) => prev + 15);
+              }
+            }}
+          >
+            {displayedMessages.map((msg) => {
               const isUser = msg.role === "user";
-              const isLastAssistantMsg = idx === lastAssistantIndex;
+              const originalIdx = messages.findIndex((m) => m.id === msg.id);
+              const isLastAssistantMsg = originalIdx === lastAssistantIndex;
               const { cleanContent, suggestions } = isUser
                 ? { cleanContent: msg.content, suggestions: [] }
                 : parseMessageContent(msg.content);
@@ -762,7 +832,7 @@ export function AITutorWidget({
                         <button
                           type="button"
                           disabled={isLoading}
-                          onClick={() => handleEditMessage(idx, cleanContent)}
+                          onClick={() => handleEditMessage(originalIdx, cleanContent)}
                           title="تعديل هذه الرسالة وإعادة الإرسال"
                           className="inline-flex items-center gap-1 text-[10px] font-bold text-on-primary/80 hover:text-on-primary hover:underline transition-all cursor-pointer disabled:opacity-50 opacity-90 group-hover:opacity-100"
                         >

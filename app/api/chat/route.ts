@@ -81,13 +81,21 @@ export async function POST(req: Request) {
       attachments,
       aiEvaluationCache,
       forceVision,
+      hiddenTeacherDirectives,
       data,
     } = body;
+
+    console.log("==== DEBUG STAGE 1: Received Directives ====", hiddenTeacherDirectives);
 
     const targetUserId =
       userId ||
       studentId ||
       (data && (data.userId || data.studentId)) ||
+      "";
+
+    const teacherDirectivesStr =
+      hiddenTeacherDirectives ||
+      (data && data.hiddenTeacherDirectives) ||
       "";
 
     // Non-blocking execution for Master Profile fetch
@@ -152,10 +160,13 @@ export async function POST(req: Request) {
 6. التعامل مع أكواد LaTeX المرفقة: إذا احتوى المرجع أو رسالة المستخدم على كود LaTeX كامل (مستند بحزم وديباجة مثل \\documentclass أو \\usepackage أو tcolorbox)، قم باستخلاص المفاهيم الرياضية، التمارين والحلول النموذجية منه فقط. لا تقم أبداً بإرجاع أو طباعة أوامر الديباجة في ردودك للتلميذ.
 7. ميزة التدريبات التفاعلية (Generative UI) - [أولوية قصوى وشرط إجباري]:
 أنت تمتلك قدرة خارقة على توليد تمارين تفاعلية تظهر كبطاقات مرئية داخل الدردشة.
-عندما يطلب منك التلميذ تمريناً، أو عندما تختبر فهمه في (جمع الكسور)، يُمنع منعاً باتاً كتابة التمرين الرياضي كنص عادي أو باستخدام LaTeX العادي.
+عندما يطلب منك التلميذ تمريناً، أو عندما تختبر فهمه، يُمنع منعاً باتاً كتابة التمرين الرياضي كنص عادي.
 يجب عليك وجوباً توليد التمرين حصرياً باستخدام كتلة كود (Code Block) من نوع \`exercise\` تحتوي على كائن JSON دقيق.
 
-مثال إجباري للصيغة التي يجب أن تلتزم بها حرفياً (مع تغيير الأرقام):
+أنت تمتلك 3 قوالب تفاعلية (اختر الأنسب حسب السياق):
+
+1. قالب "جمع الكسور" (fraction_addition):
+استخدمه لاختبار توحيد المقامات أو جمعها.
 \`\`\`exercise
 {
   "type": "fraction_addition",
@@ -165,10 +176,36 @@ export async function POST(req: Request) {
 }
 \`\`\`
 
+2. قالب "إيجاد المجهول" (equation_solving):
+استخدمه لاختبار حل المعادلات البسيطة (مثل المتراجحات المكتوبة كمعادلة، أو الضرب في المقلوب).
+\`\`\`exercise
+{
+  "type": "equation_solving",
+  "question": "2x - 4 = 10",
+  "variable": "x",
+  "correctAnswer": 7
+}
+\`\`\`
+
+3. قالب "خيارات متعددة" (multiple_choice):
+استخدمه لاختبار المفاهيم النظرية (مثل اتجاه المتراجحة، أو اختيار المجال الصحيح). الخيارات يمكن أن تحتوي على LaTeX.
+\`\`\`exercise
+{
+  "type": "multiple_choice",
+  "question": "عند ضرب طرفي المتراجحة $-2x > 4$ في العدد $-\\\\frac{1}{2}$، ماذا يحدث؟",
+  "options": [
+    "يظل اتجاه المتراجحة كما هو وتصبح $x > -2$",
+    "يتغير اتجاه المتراجحة وتصبح $x < -2$",
+    "تصبح معادلة $x = -2$"
+  ],
+  "correctIndex": 1
+}
+\`\`\`
+
 قواعد الإعدام البرمجي الصارمة (Strict Rules):
-1. إياك أن تكتب المعادلة المطلوبة من التلميذ حلها خارج كائن الـ JSON المذكور أعلاه.
-2. يجب أن يكون الـ JSON صالحاً برمجياً (Valid JSON).
-3. يمكنك كتابة سطر تشجيعي واحد فقط قبل الكتلة، مثلاً: "ممتاز، لنجرب حل هذا التمرين التفاعلي:" ثم تدرج كتلة الكود مباشرة دون أي إضافات أو شروحات أخرى.
+1. إياك أن تكتب المعادلة المطلوبة من التلميذ حلها خارج كائن الـ JSON.
+2. يجب أن يكون الـ JSON صالحاً برمجياً.
+3. يمكنك كتابة سطر تشجيعي واحد فقط قبل الكتلة، مثلاً: "لنجرب حل هذا التمرين التفاعلي للتأكد من فهمك:" ثم تدرج كتلة الكود مباشرة.
 
 سياق الدرس الحالي: "${lessonContext || "الرياضيات"}"
 
@@ -204,6 +241,11 @@ ${evalCacheStr}
 ${aggregatedLatex}
 --- نهاية المراجع والحلول النموذجية المعتمدة ---
 هذه هي المراجع وأكواد الـ LaTeX الخاصة بالتمارين والحلول النموذجية المعتمدة لهذا الدرس. استخدمها حصرياً لمقارنة حلول التلميذ وتوجيهه سقراطياً واكتشاف أي خطأ منهجي أو حسابي في حله.`;
+    }
+
+    // Inject Hidden Teacher Directives if present (Dual-Layer Context Injection)
+    if (teacherDirectivesStr && teacherDirectivesStr.trim() !== "") {
+      systemPrompt += `\n\n### توجيهات سرية وخاصة من أستاذ المادة لهذا الدرس (يجب الالتزام بها حرفياً):\n${teacherDirectivesStr.trim()}`;
     }
 
     // Inject Vision Instructions ONLY if forceVision requested image attachment
@@ -243,6 +285,8 @@ ${aggregatedLatex}
     // Primary Model -> Fallback Model Sequence (gemini-3.1-flash-lite -> gemini-2.5-flash-lite -> gemini-3.5-flash)
     let result;
     let finalModelUsed = "gemini-3.1-flash-lite";
+
+    console.log("==== DEBUG STAGE 2: System Prompt Tail ====", systemPrompt.slice(-250));
 
     try {
       console.log(
