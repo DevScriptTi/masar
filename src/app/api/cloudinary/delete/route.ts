@@ -64,10 +64,13 @@ export async function POST(req: Request) {
         const publicId = extractPublicId(url);
         if (!publicId) return { url, status: "skipped" };
         try {
-          const res = await cloudinary.uploader.destroy(publicId);
+          const isRaw = url.includes("/raw/upload/");
+          const res = await cloudinary.uploader.destroy(publicId, {
+            resource_type: isRaw ? "raw" : "image",
+          });
           return { url, publicId, result: res.result };
         } catch (err: any) {
-          console.error(`Failed to destroy Cloudinary image ${publicId}:`, err);
+          console.error(`Failed to destroy Cloudinary file ${publicId}:`, err);
           return { url, publicId, error: err.message };
         }
       })

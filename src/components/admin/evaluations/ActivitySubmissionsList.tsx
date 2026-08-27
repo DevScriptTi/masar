@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { db } from "@/lib/firebase/config";
 import {
   collection,
@@ -72,9 +73,10 @@ export interface LocalSubmissionItem {
 
 interface ActivitySubmissionsListProps {
   activityId: string;
+  courseId?: string;
 }
 
-export function ActivitySubmissionsList({ activityId }: ActivitySubmissionsListProps) {
+export function ActivitySubmissionsList({ activityId, courseId }: ActivitySubmissionsListProps) {
   const [submissions, setSubmissions] = useState<LocalSubmissionItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -444,9 +446,19 @@ export function ActivitySubmissionsList({ activityId }: ActivitySubmissionsListP
           </div>
         </div>
 
-        <span className="text-xs font-extrabold text-on-surface-variant bg-surface-variant/40 px-3 py-1 rounded-xl border border-outline/10">
-          {studentIds.length} تلاميذ قاموا بالتسليم
-        </span>
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-extrabold text-on-surface-variant bg-surface-variant/40 px-3 py-1.5 rounded-xl border border-outline/10">
+            {studentIds.length} تلاميذ قاموا بالتسليم
+          </span>
+
+          <Link
+            href={`/teacher/courses/${courseId || submissions[0]?.courseId || ""}/activities/${activityId}/submissions`}
+            className="px-4 py-2 rounded-xl bg-primary text-on-primary font-extrabold text-xs hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-sm"
+          >
+            <Award className="w-4 h-4" />
+            <span>فتح مصمم تقييم المحطات الشامل (Grader UI)</span>
+          </Link>
+        </div>
       </div>
 
       {/* Task A: Global Activity Controls Panel */}

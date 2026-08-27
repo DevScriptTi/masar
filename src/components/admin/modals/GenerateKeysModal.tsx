@@ -40,7 +40,7 @@ export function GenerateKeysModal({
       );
       setGroups(activeGroups);
       if (activeGroups.length > 0 && !selectedGroupId) {
-        setSelectedGroupId(activeGroups[0].name || activeGroups[0].id || "");
+        setSelectedGroupId(activeGroups[0].id || "");
       }
     } catch (error) {
       console.error("Error loading groups:", error);
@@ -56,9 +56,10 @@ export function GenerateKeysModal({
     e.preventDefault();
     setErrorMessage(null);
 
-    const targetGroup = selectedGroupId.trim();
+    const targetGroupId = selectedGroupId.trim();
+    const selectedGroupObj = groups.find((g) => g.id === targetGroupId);
 
-    if (!targetGroup) {
+    if (!targetGroupId) {
       setErrorMessage("يرجى اختيار الفوج المستهدف.");
       return;
     }
@@ -71,7 +72,8 @@ export function GenerateKeysModal({
     setGenerating(true);
 
     try {
-      await generateKeys(targetGroup, quantity);
+      // Pass strict Firestore document ID and optional group name for formatting
+      await generateKeys(targetGroupId, quantity, selectedGroupObj?.name);
       if (onSuccess) onSuccess();
       onClose();
     } catch (error) {
@@ -125,7 +127,7 @@ export function GenerateKeysModal({
 
         {/* Modal Form */}
         <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-          {/* Select Dropdown: Group ID (CRITICAL: Populated from Firestore groups) */}
+          {/* Select Dropdown: Group ID (CRITICAL: Populated with strict Firestore Document ID) */}
           <div className="space-y-2">
             <label htmlFor="selectGroup" className="block text-xs font-semibold text-on-surface-variant">
               الفوج المستهدف <span className="text-error">*</span>
@@ -142,10 +144,10 @@ export function GenerateKeysModal({
                 {loadingGroups ? (
                   <option value="">جاري تحميل الأفواج من الفايرستور...</option>
                 ) : groups.length === 0 ? (
-                  <option value="">لا توجد أفواج حالياً (أدخل اسماً جديداً)</option>
+                  <option value="">لا توجد أفواج حالياً</option>
                 ) : (
                   groups.map((g) => (
-                    <option key={g.id || g.name} value={g.name || g.id}>
+                    <option key={g.id} value={g.id}>
                       {g.name} {g.description ? `(${g.description})` : ""}
                     </option>
                   ))

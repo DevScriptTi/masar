@@ -1,10 +1,12 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useAdminLayout } from "./AdminLayoutWrapper";
 import { ThemeToggle } from "@/src/components/ThemeToggle";
-import { Menu, ShieldCheck, Bell } from "lucide-react";
+import { NotificationBell } from "@/src/components/student/NotificationBell";
+import { Menu, ShieldCheck, Bell, User, Settings } from "lucide-react";
 
 export function TopAppBar() {
   const { userData } = useAuth();
@@ -44,28 +46,25 @@ export function TopAppBar() {
         </div>
       </div>
 
-      {/* Left Side (RTL End): Action Group (Theme Toggle, Notifications, User Name Badge) */}
+      {/* Left Side (RTL End): Action Group (Theme Toggle, Notifications, Profile Link) */}
       <div className="flex items-center gap-2.5 sm:gap-3">
         {/* Theme Toggle Button */}
         <ThemeToggle />
 
-        {/* Notification Icon Button */}
-        <button
-          type="button"
-          className="relative flex items-center justify-center w-10 h-10 rounded-full bg-surface-variant/60 text-on-surface-variant hover:bg-surface-variant hover:text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-300 transform active:scale-95 shadow-sm"
-          aria-label="التنبيهات والإشعارات"
-          title="الإشعارات"
-        >
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-error animate-pulse" />
-        </button>
+        {/* Real-time Notification Bell */}
+        <NotificationBell />
 
-        {/* User Name Badge */}
-        {userData?.fullName && (
-          <span className="hidden sm:inline-flex text-xs font-semibold text-on-surface-variant bg-surface-variant/50 px-3.5 py-1.5 rounded-full border border-outline/10">
-            {userData.fullName}
+        {/* Profile / Settings Button */}
+        <Link
+          href="/settings"
+          className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-surface-variant/50 hover:bg-surface-variant text-on-surface-variant hover:text-on-surface border border-outline/10 text-xs font-semibold transition-all duration-200 active:scale-95"
+          title="إعدادات الحساب والملف الشخصي"
+        >
+          <User className="w-4 h-4 text-primary" />
+          <span className="hidden sm:inline">
+            {userData?.fullName || userData?.displayName || "الملف الشخصي"}
           </span>
-        )}
+        </Link>
       </div>
     </header>
   );

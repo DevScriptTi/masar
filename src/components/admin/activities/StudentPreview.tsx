@@ -1,8 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ActivityDoc } from "@/src/lib/firebase/coursesService";
 import { formatPdfEmbedUrl, formatYouTubeUrl, parseLatexSegments } from "@/src/lib/utils/formatters";
+import { HomeworkUploader } from "@/src/components/student/HomeworkUploader";
+import Lightbox from "yet-another-react-lightbox";
+import Zoom from "yet-another-react-lightbox/plugins/zoom";
+import Counter from "yet-another-react-lightbox/plugins/counter";
+import "yet-another-react-lightbox/styles.css";
+import "yet-another-react-lightbox/plugins/counter.css";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import {
@@ -20,7 +26,27 @@ import {
   Upload,
   Maximize2,
   Minimize2,
+  Sparkles,
+  Send,
+  Image as ImageIcon,
+  Bot,
+  User,
+  Layers,
+  Loader2,
+  Plus,
+  ZoomIn,
+  Paperclip,
+  ChevronRight,
+  ChevronLeft,
 } from "lucide-react";
+
+export interface ChatMessage {
+  id: string;
+  sender: "ai" | "student";
+  text: string;
+  images?: string[];
+  timestamp: string;
+}
 
 /**
  * Helper component that parses LaTeX math formulas wrapped in $...$ or $$...$$
@@ -90,6 +116,108 @@ export function StudentPreview({ activity, courseTitle }: StudentPreviewProps) {
   const [selectedPdfUrl, setSelectedPdfUrl] = useState<string | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
 
+  // Station Navigation State & Socratic AI Chat State
+  const stationsList =
+    activity.stations && activity.stations.length > 0
+      ? activity.stations
+      : [
+          {
+            id: "station_default",
+            order: 1,
+            title: "المحطة 1: التفاعل الشامل",
+            content: activity.description || activity.title || "تفضل بحل التمرين المطلوب واستعمال المساعد الذكي سقراطياً.",
+            aiDirectives: "ساعد التلميذ في استيعاب مفاهيم المحطة خطوة بخطوة.",
+          },
+        ];
+
+  const [activeStationIndex, setActiveStationIndex] = useState<number>(0);
+  const currentStation = stationsList[activeStationIndex] || stationsList[0];
+
+  // Chat messages keyed by station ID
+  const [stationChats, setStationChats] = useState<Record<string, ChatMessage[]>>({});
+  const [inputText, setInputText] = useState("");
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [showImageUploader, setShowImageUploader] = useState(false);
+  const [isAiThinking, setIsAiThinking] = useState(false);
+
+  // Lightbox State for Chat Images
+  const [chatLightboxOpen, setChatLightboxOpen] = useState(false);
+  const [chatLightboxIndex, setChatLightboxIndex] = useState(0);
+  const [chatLightboxSlides, setChatLightboxSlides] = useState<Array<{ src: string }>>([]);
+
+  // Auto-initialize Socratic AI Greeting for active station
+  useEffect(() => {
+    const stId = currentStation.id || `st_${activeStationIndex}`;
+    if (!stationChats[stId] || stationChats[stId].length === 0) {
+      const initialGreeting: ChatMessage = {
+        id: `msg_init_${stId}`,
+        sender: "ai",
+        text: `مرحباً بك في **${currentStation.title || `المحطة #${activeStationIndex + 1}`}**! 👋\n\n**المهمة الحالية للوكيل المطلوب إنجازها:**\n${currentStation.content || "قم بحل المطلوب وتزويد المساعد الذكي بإجابتك"}\n\nاكتب إجابتك أو أرفق صورة لحلك اليدوي لمراجعتها وتوجيهك سقراطياً!`,
+        timestamp: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
+      };
+      setStationChats((prev) => ({
+        ...prev,
+        [stId]: [initialGreeting],
+      }));
+    }
+  }, [activeStationIndex, currentStation]);
+
+  const handleSendMessage = () => {
+    if (!inputText.trim() && attachedImages.length === 0) return;
+
+    const stId = currentStation.id || `st_${activeStationIndex}`;
+    const userMsg: ChatMessage = {
+      id: `msg_user_${Date.now()}`,
+      sender: "student",
+      text: inputText.trim(),
+      images: [...attachedImages],
+      timestamp: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    setStationChats((prev) => ({
+      ...prev,
+      [stId]: [...(prev[stId] || []), userMsg],
+    }));
+
+    setInputText("");
+    setAttachedImages([]);
+    setShowImageUploader(false);
+    setIsAiThinking(true);
+
+    setTimeout(() => {
+      let aiText = `أحسنت في هذه الإجابة! 👏 دعنا نناقش خطوتك في **${currentStation.title || `المحطة #${activeStationIndex + 1}`}** سقراطياً:`;
+
+      if (userMsg.images && userMsg.images.length > 0) {
+        aiText += `\n\nلقد قمت بفحص صورة حلك اليدوي المرفقة (${userMsg.images.length} صورة). خطوات الكتابة واضحة وممتازة!`;
+      }
+
+      if (currentStation.aiDirectives) {
+        aiText += `\n\n💡 **توجيه الوكيل المميز:** تم تطبيق التوجيهات الخاصة بالنشاط. هل يمكنك مراجعة خطوة الحساب الأولى للتأكد من النتيجة؟`;
+      } else {
+        aiText += `\n\nخطواتك دقيقة، هل تود الانتقال إلى المحطة التالية أم نراجع هذه الخطوة بالتفصيل؟`;
+      }
+
+      const aiMsg: ChatMessage = {
+        id: `msg_ai_${Date.now()}`,
+        sender: "ai",
+        text: aiText,
+        timestamp: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
+      };
+
+      setStationChats((prev) => ({
+        ...prev,
+        [stId]: [...(prev[stId] || []), aiMsg],
+      }));
+      setIsAiThinking(false);
+    }, 1200);
+  };
+
+  const handleOpenChatImage = (images: string[], index: number) => {
+    setChatLightboxSlides(images.map((img) => ({ src: img })));
+    setChatLightboxIndex(index);
+    setChatLightboxOpen(true);
+  };
+
   // Student Interactive Quiz Test State
   const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
   const [submittedQuiz, setSubmittedQuiz] = useState(false);
@@ -119,7 +247,7 @@ export function StudentPreview({ activity, courseTitle }: StudentPreviewProps) {
   const calculateScore = () => {
     if (!activity.quiz) return 0;
     let score = 0;
-    activity.quiz.forEach((q, idx) => {
+    activity.quiz.forEach((q: any, idx: number) => {
       if (userAnswers[idx] === q.correctIndex) {
         score += 1;
       }
@@ -246,21 +374,233 @@ export function StudentPreview({ activity, courseTitle }: StudentPreviewProps) {
           </div>
         )}
 
-        {/* Student Homework Submission Box if required */}
-        {activity.requireSubmission && (
-          <div className="p-5 rounded-2xl bg-surface-variant/30 border border-outline/15 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-on-surface">
-              <Upload className="w-4 h-4 text-primary" />
-              <span>تسليم إجابة الطالب (تمرين يتطلب تسليم)</span>
+        {/* Dynamic Station-by-Station AI Chat Interface (Socratic Navigation) */}
+        <div className="space-y-4 pt-4 border-t border-outline/10">
+          <div className="p-5 rounded-3xl bg-surface-variant/20 border border-outline/15 space-y-4 shadow-sm">
+            {/* Header & Station Navigation Progress */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-on-surface">المساعد الذكي السقراطي - المحطات التفاعلية</h3>
+                    <p className="text-[11px] text-on-surface-variant">تنقل بين محطات النشاط وناقش حلك خطوة بخطوة مع الذكاء الاصطناعي</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs font-extrabold text-primary bg-primary/10 px-3 py-1.5 rounded-xl border border-primary/20">
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>المحطة الحالية: {activeStationIndex + 1} من {stationsList.length}</span>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="w-full h-2 rounded-full bg-surface-variant/60 overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-500 rounded-full"
+                  style={{ width: `${((activeStationIndex + 1) / stationsList.length) * 100}%` }}
+                />
+              </div>
+
+              {/* Station Navigation Pills/Tabs */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                {stationsList.map((st, idx) => {
+                  const isActive = idx === activeStationIndex;
+                  return (
+                    <button
+                      key={st.id || idx}
+                      type="button"
+                      onClick={() => setActiveStationIndex(idx)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 border ${
+                        isActive
+                          ? "bg-primary text-on-primary border-primary shadow-xs"
+                          : "bg-surface text-on-surface-variant border-outline/20 hover:border-primary/40"
+                      }`}
+                    >
+                      <span className="w-4 h-4 rounded-full bg-surface/20 flex items-center justify-center text-[10px]">
+                        {idx + 1}
+                      </span>
+                      <span className="truncate max-w-[150px]">{st.title || `المحطة ${idx + 1}`}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <p className="text-xs text-on-surface-variant/80">
-              يتطلب هذا النشاط رفع صور الحل أو ملف PDF لمراجعة الأستاذ وتقييمه.
-            </p>
-            <div className="p-4 rounded-xl border border-dashed border-outline/30 text-center text-xs font-medium text-on-surface-variant bg-surface">
-              [منطقة رفع تسليم إجابة الطالب]
+
+            {/* Active Station Focus / Task Card */}
+            <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 space-y-1">
+              <span className="text-[11px] font-extrabold text-indigo-700 dark:text-indigo-300 block">
+                المهمة المطلوبة في {currentStation.title || `المحطة #${activeStationIndex + 1}`}:
+              </span>
+              <div className="text-xs font-medium text-on-surface">
+                <MathText content={currentStation.content} />
+              </div>
+            </div>
+
+            {/* Station AI Chat Area */}
+            <div className="space-y-3">
+              {/* Chat Messages Timeline */}
+              <div className="p-4 rounded-2xl bg-surface border border-outline/15 max-h-[420px] overflow-y-auto space-y-4 shadow-inner">
+                {((currentStation.id && stationChats[currentStation.id]) || stationChats[`st_${activeStationIndex}`] || []).map((msg) => {
+                  const isAi = msg.sender === "ai";
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex gap-3 items-start ${isAi ? "justify-start" : "justify-end"}`}
+                    >
+                      {isAi && (
+                        <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0 border border-indigo-500/20">
+                          <Bot className="w-4 h-4" />
+                        </div>
+                      )}
+
+                      <div
+                        className={`max-w-[85%] sm:max-w-[75%] p-4 rounded-2xl space-y-2 text-xs leading-relaxed ${
+                          isAi
+                            ? "bg-indigo-500/10 border border-indigo-500/20 text-on-surface rounded-tr-xs shadow-2xs"
+                            : "bg-primary text-on-primary rounded-tl-xs shadow-xs"
+                        }`}
+                      >
+                        <div className="font-medium whitespace-pre-line">
+                          <MathText content={msg.text} />
+                        </div>
+
+                        {/* Student Attached Images Grid */}
+                        {msg.images && msg.images.length > 0 && (
+                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-outline/10">
+                            {msg.images.map((imgUrl, imgIdx) => (
+                              <div
+                                key={imgIdx}
+                                onClick={() => handleOpenChatImage(msg.images!, imgIdx)}
+                                className="group relative aspect-4/3 rounded-xl overflow-hidden border border-outline/20 bg-surface cursor-pointer shadow-2xs"
+                              >
+                                <img src={imgUrl} alt="صورة الحل" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-bold gap-1">
+                                  <ZoomIn className="w-3.5 h-3.5" />
+                                  <span>تكبير</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <span className={`text-[9px] block text-left ${isAi ? "text-on-surface-variant/70" : "text-on-primary/80"}`}>
+                          {msg.timestamp}
+                        </span>
+                      </div>
+
+                      {!isAi && (
+                        <div className="w-8 h-8 rounded-xl bg-primary text-on-primary flex items-center justify-center shrink-0">
+                          <User className="w-4 h-4" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* AI Thinking Indicator */}
+                {isAiThinking && (
+                  <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold max-w-fit">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>جاري تحليل إجابتك وسياق المحطة بواسطة المساعد الذكي...</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Attached Images Preview Bar */}
+              {attachedImages.length > 0 && (
+                <div className="p-3 rounded-2xl bg-surface border border-outline/20 space-y-2">
+                  <span className="text-[11px] font-bold text-on-surface flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-primary" />
+                    <span>الصور المرفقة المعينة للإرسال: ({attachedImages.length})</span>
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {attachedImages.map((url, idx) => (
+                      <div key={idx} className="relative w-16 h-16 rounded-xl overflow-hidden border border-outline/30 group">
+                        <img src={url} alt="مرفق" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setAttachedImages(attachedImages.filter((_, i) => i !== idx))}
+                          className="absolute top-1 left-1 w-5 h-5 rounded-full bg-error text-on-error flex items-center justify-center"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Inline HomeworkUploader Drawer */}
+              {showImageUploader && (
+                <div className="p-4 rounded-2xl bg-surface border border-outline/20 space-y-2 animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-on-surface flex items-center gap-1.5">
+                      <ImageIcon className="w-4 h-4 text-primary" />
+                      <span>إرفاق صور الحلول اليدوية أو المسودة</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowImageUploader(false)}
+                      className="text-on-surface-variant hover:text-on-surface p-1"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <HomeworkUploader
+                    currentUrls={attachedImages}
+                    onUploadSuccess={(urls) => {
+                      setAttachedImages(urls);
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Bottom Input Controls Bar */}
+              <div className="flex items-center gap-2 bg-surface p-2 rounded-2xl border border-outline/25 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setShowImageUploader(!showImageUploader)}
+                  className={`h-11 px-3.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                    showImageUploader || attachedImages.length > 0
+                      ? "bg-primary/10 border-primary text-primary"
+                      : "bg-surface-variant/40 border-outline/20 text-on-surface-variant hover:bg-surface-variant"
+                  }`}
+                  title="إرفاق صورة الحل اليدوي"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                  <span className="hidden sm:inline">إرفاق صورة الحل</span>
+                </button>
+
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  placeholder="اكتب إجابتك أو سؤالك حول هذه المحطة هنا..."
+                  className="flex-1 h-11 px-4 rounded-xl bg-surface-variant/30 border border-outline/20 text-on-surface text-xs font-medium focus:outline-none focus:border-primary"
+                />
+
+                <button
+                  type="button"
+                  onClick={handleSendMessage}
+                  disabled={!inputText.trim() && attachedImages.length === 0}
+                  className="h-11 px-5 rounded-xl bg-primary text-on-primary font-bold text-xs hover:bg-primary/90 transition-all shadow-md flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                >
+                  <span>إرسال</span>
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Student Interactive Quiz Section */}
         {activity.hasQuiz && activity.quiz && activity.quiz.length > 0 && (
@@ -278,7 +618,7 @@ export function StudentPreview({ activity, courseTitle }: StudentPreviewProps) {
             </div>
 
             <div className="space-y-5">
-              {activity.quiz.map((q, qIdx) => {
+              {activity.quiz.map((q: any, qIdx: number) => {
                 const selectedOpt = userAnswers[qIdx];
 
                 return (
@@ -293,7 +633,7 @@ export function StudentPreview({ activity, courseTitle }: StudentPreviewProps) {
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                      {q.options.map((optText, oIdx) => {
+                      {q.options.map((optText: any, oIdx: number) => {
                         const isSelected = selectedOpt === oIdx;
                         const isCorrectOption = q.correctIndex === oIdx;
 
@@ -431,6 +771,15 @@ export function StudentPreview({ activity, courseTitle }: StudentPreviewProps) {
           </div>
         </div>
       )}
+
+      {/* Lightbox Component for High-Res Zoom on Chat Images */}
+      <Lightbox
+        open={chatLightboxOpen}
+        close={() => setChatLightboxOpen(false)}
+        index={chatLightboxIndex}
+        slides={chatLightboxSlides}
+        plugins={[Zoom, Counter]}
+      />
     </div>
   );
 }

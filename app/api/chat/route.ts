@@ -1,6 +1,8 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { streamText } from "ai";
+import { streamText, tool, stepCountIs } from "ai";
+import { z } from "zod";
 import { getStudentMasterProfile } from "@/lib/firebase/masterProfile";
+import { getModuleById } from "@/src/lib/firebase/coursesService";
 
 // Resilient server-side image fetch helper using Vercel AI SDK "file" content part (non-deprecated)
 async function fetchImagePart(url: string, index: number): Promise<any> {
@@ -82,6 +84,7 @@ export async function POST(req: Request) {
       aiEvaluationCache,
       forceVision,
       hiddenTeacherDirectives,
+      moduleId,
       data,
     } = body;
 
@@ -91,6 +94,11 @@ export async function POST(req: Request) {
       userId ||
       studentId ||
       (data && (data.userId || data.studentId)) ||
+      "";
+
+    const targetModuleId =
+      moduleId ||
+      (data && data.moduleId) ||
       "";
 
     const teacherDirectivesStr =
@@ -253,8 +261,153 @@ ${aggregatedLatex}
       systemPrompt += `\n\n8. صور حل التلميذ المرفقة: لقد طلب التلميذ مراجعة صور إجابته بصرياً المرفقة (${imagesPayload.length} صورة). عند الإشارة إلى أي صورة أو خطأ فيها، استخدم التنسيق الحرفي الحصري التالي فقط: [الصورة X](#image-X) حيث X هو رقم الصورة الحقيقي (من 1 إلى ${imagesPayload.length}).`;
     }
 
+    // Station Mode Check & System Log Injection (Overriding default system prompt if station mode is active)
+    const isStationChat = Boolean(
+      body.isStationMode ||
+      body.stationMode ||
+      body.currentStation ||
+      (data && (data.isStationMode || data.stationMode || data.currentStation))
+    );
+
+    if (isStationChat) {
+      const actGlobalContext =
+        body.globalContext ||
+        body.globalLatexSummary ||
+        (body.activity && (body.activity.globalContext || body.activity.globalLatexSummary)) ||
+        (data && (data.globalContext || data.globalLatexSummary)) ||
+        lessonSummary ||
+        "لا يوجد سياق عام محدد.";
+
+      const stationData =
+        body.currentStation ||
+        (data && data.currentStation) || {
+          title: body.stationTitle || "المحطة الحالية",
+          content: body.stationContent || "حل التمرين المطلوب",
+          aiDirectives: body.stationAiDirectives || teacherDirectivesStr || "",
+          customIsolations: body.stationCustomIsolations || [],
+        };
+
+      // 1. Strict Global Isolation Filtering by targetUserId (studentId)
+      let resolvedGlobalIsolationNote = "";
+      const rawGlobalIsolations =
+        body.globalCustomIsolations ||
+        (body.activity && body.activity.globalCustomIsolations) ||
+        (data && (data.globalCustomIsolations || (data.activity && data.activity.globalCustomIsolations)));
+
+      if (Array.isArray(rawGlobalIsolations) && targetUserId) {
+        const matchingGlobalRule = rawGlobalIsolations.find((iso: any) => {
+          const ids = iso.studentIds || iso.isolatedStudentIds || iso.targetIds || [];
+          return Array.isArray(ids) && ids.includes(targetUserId);
+        });
+        if (matchingGlobalRule) {
+          resolvedGlobalIsolationNote =
+            matchingGlobalRule.specificContextNote ||
+            matchingGlobalRule.stationContextNote ||
+            matchingGlobalRule.note ||
+            "";
+        }
+      } else if (body.globalIsolationNote || (data && data.globalIsolationNote)) {
+        resolvedGlobalIsolationNote = body.globalIsolationNote || (data && data.globalIsolationNote) || "";
+      }
+
+      // 2. Strict Station Isolation Filtering by targetUserId (studentId)
+      let resolvedStationIsolationNote = "";
+      const rawStationIsolations =
+        stationData.customIsolations ||
+        body.stationCustomIsolations ||
+        (data && (data.stationCustomIsolations || (data.currentStation && data.currentStation.customIsolations)));
+
+      if (Array.isArray(rawStationIsolations) && targetUserId) {
+        const matchingStationRule = rawStationIsolations.find((iso: any) => {
+          const ids = iso.studentIds || iso.isolatedStudentIds || iso.targetIds || [];
+          return Array.isArray(ids) && ids.includes(targetUserId);
+        });
+        if (matchingStationRule) {
+          resolvedStationIsolationNote =
+            matchingStationRule.specificContextNote ||
+            matchingStationRule.stationContextNote ||
+            matchingStationRule.note ||
+            "";
+        }
+      } else if (body.stationIsolationNote || (data && data.stationIsolationNote)) {
+        resolvedStationIsolationNote = body.stationIsolationNote || (data && data.stationIsolationNote) || "";
+      }
+
+      systemPrompt = `
+[SYSTEM LOG - INITIALIZATION]
+أنت "وكيل المحطات السقراطي" التابع للأستاذ فوزي. التلميذ الذي أمامك هو: ${studentDisplayName}.
+
+--- إعدادات النشاط العام ---
+${actGlobalContext}
+
+--- العزل العام للتلميذ (إن وجد) ---
+${resolvedGlobalIsolationNote && String(resolvedGlobalIsolationNote).trim() !== "" ? resolvedGlobalIsolationNote : "لا يوجد توجيه مخصص لهذا التلميذ."}
+
+--- بيانات المحطة الحالية: ${stationData.title || "المحطة الحالية"} ---
+الهدف: ${stationData.content || "حل المطلوب وتزويد المساعد بإجابتك"}
+التوجيه السري للمعلم: ${stationData.aiDirectives || "لا يوجد."}
+
+--- العزل الخاص بالمحطة لهذا التلميذ (إن وجد) ---
+${resolvedStationIsolationNote && String(resolvedStationIsolationNote).trim() !== "" ? resolvedStationIsolationNote : "لا يوجد توجيه مخصص لهذا التلميذ."}
+
+[RULES]
+1. لا تقدم الحلول الجاهزة أبداً.
+2. قيّم أي صورة يرسلها التلميذ بناءً على التوجيه السري للمحطة حصراً.
+3. لا تنتقل لطلب مهام المحطة التالية؛ ركز فقط على المحطة الحالية.
+4. إياك واستخدام روابط Markdown للصور مثل [الصورة](#image-1). أشار للصور بالحديث عنها طبيعياً في النص (مثال: 'في محاولتك المرفقة').
+5. إذا أردت اختبار التلميذ بسؤال أو تمرين، اطرح السؤال طبيعياً بنص عادي وبسيط دون استخدام أكواد JSON أو كتل كود.
+`.trim();
+    }
+
+    const technicalDirectives = `
+=== توجيهات تنسيقية تقنية صارمة (يجب الالتزام بها حرفياً) ===
+1. **تنسيق النهايات (Limits):** عند كتابة أي نهاية رياضية، يُمنع منعاً باتاً استخدام الصيغة المختصرة \\lim_{x \\to a}. يجب عليك دائماً وحصرياً استخدام الصيغة: \\lim\\limits_{x \\to a} لضمان ظهورها بشكل سليم في الواجهة.
+2. **الإشارة للصور المرفقة:** التلميذ أرفق صوراً لحله. عندما تشير إلى هذه الصور في ردك، استخدم كلمات عادية مثل "في صورتك الأولى" أو "في الحل المرفق". يُمنع منعاً باتاً استخدام أي روابط ماركداون (Markdown Links) للصور مثل [الصورة 1](#) أو محاولة تضمين رابط الصورة. فقط أشر إليها نصياً.
+`.trim();
+
+    systemPrompt += `\n\n${technicalDirectives}`;
+
+    // Backend Audit Logger: Print exact assembled System Prompt to server terminal
+    console.log("\n========== [SYSTEM PROMPT DEBUG START] ==========");
+    console.log(systemPrompt);
+    console.log("========== [SYSTEM PROMPT DEBUG END] ==========\n");
+
+    // Reference Images Injection (Teacher's Official Reference Diagrams / Graphs)
+    const referenceImageUrlsPayload: string[] =
+      Array.isArray(body.referenceImageUrls) && body.referenceImageUrls.length > 0
+        ? body.referenceImageUrls
+        : data && Array.isArray(data.referenceImageUrls)
+        ? data.referenceImageUrls
+        : [];
+
+    const referenceMessages: any[] = [];
+    if (referenceImageUrlsPayload.length > 0) {
+      const refPartsPromises = referenceImageUrlsPayload.map((url, idx) => fetchImagePart(url, idx));
+      const resolvedRefParts = await Promise.all(refPartsPromises);
+      const validRefParts = resolvedRefParts.filter(Boolean);
+
+      if (validRefParts.length > 0) {
+        referenceMessages.push(
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `[الصور المرجعية المعتمدة من أستاذ المادة للدرس/النشاط]: هذه ${validRefParts.length} صور مرجعية معتمدة (رسومات بيانية، منحنيات دالة، أو أشكال هندسية) تابعة للنشاط. اعتمد عليها وافحصها بدقة إذا سأل التلميذ عنها أو تطلب التمرين تحليلها:`,
+              },
+              ...validRefParts,
+            ],
+          },
+          {
+            role: "assistant",
+            content: "فهمت. قمت بقراءة وحفظ الصور المرجعية المعتمدة من الأستاذ، وسأعتمد عليها حصرياً في توجيه التلميذ وتحليل منحنيات ورسومات التمرين.",
+          }
+        );
+      }
+    }
+
     // Fast Payload vs Multimodal Vision Payload
-    const promptMessages = [...baseMessages];
+    const promptMessages = [...referenceMessages, ...baseMessages];
     if (shouldIncludeImages) {
       const lastUserIdx = promptMessages.map((m) => m.role).lastIndexOf("user");
       if (lastUserIdx !== -1) {
@@ -282,7 +435,47 @@ ${aggregatedLatex}
       }
     }
 
-    // Primary Model -> Fallback Model Sequence (gemini-3.1-flash-lite -> gemini-2.5-flash-lite -> gemini-3.5-flash)
+    // Dynamic Tool Definition: getModuleSyllabus
+    const chatTools = {
+      getModuleSyllabus: tool({
+        description:
+          "استخدم هذه الأداة حصرياً عندما يسأل التلميذ سؤالاً شمولياً يتطلب منك مراجعة التدرج السنوي الوزاري أو القوانين التفصيلية للوحدة الحالية.",
+        inputSchema: z.object({
+          reason: z.string().describe("سبب استدعاء أداة جلب محتوى الوحدة بالتفصيل"),
+        }),
+        execute: async ({ reason }) => {
+          console.log(
+            "🛠️ AI Executing getModuleSyllabus tool... Reason:",
+            reason,
+            "targetModuleId:",
+            targetModuleId
+          );
+          if (!targetModuleId) {
+            return "لا توجد وحدة محددة حالياً في سياق الجلسة.";
+          }
+
+          try {
+            const moduleDoc = await getModuleById(targetModuleId);
+            if (
+              !moduleDoc ||
+              !moduleDoc.moduleDetailedLatex ||
+              !moduleDoc.moduleDetailedLatex.trim()
+            ) {
+              return "لا يوجد محتوى تفصيلي إضافي مدون لهذه الوحدة في قاعدة البيانات.";
+            }
+
+            return `--- بداية التدرج السنوي والقوانين التفصيلية للوحدة ---
+${moduleDoc.moduleDetailedLatex.trim()}
+--- نهاية القوانين التفصيلية للوحدة ---`;
+          } catch (err: any) {
+            console.error("Error executing getModuleSyllabus tool:", err);
+            return "حدث خطأ أثناء جلب محتوى الوحدة من قاعدة البيانات.";
+          }
+        },
+      }),
+    };
+
+    // Primary Model -> Working Model (gemini-3.1-flash-lite)
     let result;
     let finalModelUsed = "gemini-3.1-flash-lite";
 
@@ -296,42 +489,15 @@ ${aggregatedLatex}
         model: customGoogle(finalModelUsed),
         system: systemPrompt,
         messages: promptMessages,
+        tools: chatTools,
+        stopWhen: stepCountIs(5),
       });
     } catch (primaryError: any) {
-      console.warn(
-        `⚠️ Primary model "${finalModelUsed}" failed. Triggering fallback to gemini-2.5-flash-lite... Error:`,
+      console.error(
+        `🚨 Primary model "${finalModelUsed}" failed:`,
         primaryError?.message || primaryError
       );
-
-      // Fallback Model 1
-      finalModelUsed = "gemini-2.5-flash-lite";
-      console.log(`🤖 Attempting streamText with fallback model: "${finalModelUsed}"...`);
-
-      try {
-        result = await streamText({
-          model: customGoogle(finalModelUsed),
-          system: systemPrompt,
-          messages: promptMessages,
-        });
-      } catch (fallbackError: any) {
-        console.warn(
-          `⚠️ Secondary model "${finalModelUsed}" failed. Attempting tertiary fallback (gemini-3.5-flash)... Error:`,
-          fallbackError?.message || fallbackError
-        );
-
-        // Fallback Model 2
-        finalModelUsed = "gemini-3.5-flash";
-        try {
-          result = await streamText({
-            model: customGoogle(finalModelUsed),
-            system: systemPrompt,
-            messages: promptMessages,
-          });
-        } catch (tertiaryError: any) {
-          console.error("🚨 All candidate models completely failed.");
-          throw tertiaryError;
-        }
-      }
+      throw primaryError;
     }
 
     console.log(`✅ Success streaming AI Tutor response with model "${finalModelUsed}"`);

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { auth, db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { CourseCard } from "@/src/components/student/CourseCard";
 import { ThemeToggle } from "@/src/components/ThemeToggle";
@@ -17,6 +17,7 @@ import {
   LogOut,
   Loader2,
   Sparkles,
+  User,
 } from "lucide-react";
 
 export default function StudentDashboardPage() {
@@ -26,14 +27,20 @@ export default function StudentDashboardPage() {
   // Local states for raw data fetching & strict rendering
   const [authorizedCourses, setAuthorizedCourses] = useState<any[]>([]);
   const [isFetchingCourses, setIsFetchingCourses] = useState(true);
+  const [teacherName, setTeacherName] = useState<string | null>(null);
 
   // Security & Authentication Routing Guard
   useEffect(() => {
     if (!authLoading) {
-      if (!user || !userData) {
+      if (!user) {
         router.replace("/login");
-      } else if (userData.role === "admin" || String(userData.role).toLowerCase() === "admin") {
-        router.replace("/admin/dashboard");
+      } else if (userData) {
+        const role = String(userData.role || "").trim().toLowerCase();
+        if (role === "super_admin") {
+          router.replace("/super-admin");
+        } else if (role === "teacher" || role === "admin" || userData.isAdmin === true) {
+          router.replace("/teacher/dashboard");
+        }
       }
     }
   }, [user, userData, authLoading, router]);
@@ -156,6 +163,27 @@ export default function StudentDashboardPage() {
     fetchCourses();
   }, [userData]);
 
+  // Fetch Teacher Name if student has teacherId
+  useEffect(() => {
+    async function fetchTeacher() {
+      if (userData?.teacherId) {
+        try {
+          const teacherDocRef = doc(db, "users", userData.teacherId);
+          const teacherSnap = await getDoc(teacherDocRef);
+          if (teacherSnap.exists()) {
+            const tData = teacherSnap.data();
+            setTeacherName(tData.fullName || tData.displayName || tData.email || "الأستاذ المشرف");
+          }
+        } catch (err) {
+          console.error("Error fetching teacher info:", err);
+        }
+      }
+    }
+    if (userData) {
+      fetchTeacher();
+    }
+  }, [userData]);
+
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -204,6 +232,14 @@ export default function StudentDashboardPage() {
         <div className="flex items-center gap-3">
           <NotificationBell />
           <ThemeToggle />
+          <Link
+            href="/settings"
+            className="h-10 px-3.5 rounded-xl bg-surface-variant/40 text-on-surface-variant font-bold text-xs hover:bg-surface-variant hover:text-on-surface transition-all flex items-center gap-1.5 border border-outline/10"
+            title="إعدادات الحساب والملف الشخصي"
+          >
+            <User className="w-4 h-4" />
+            <span className="hidden sm:inline">الملف الشخصي</span>
+          </Link>
           <button
             type="button"
             onClick={handleLogout}
@@ -231,6 +267,14 @@ export default function StudentDashboardPage() {
             <h2 className="text-2xl sm:text-3xl font-extrabold text-on-surface tracking-tight">
               أهلاً بك، {userData.displayName || userData.fullName || "تلميذنا العزيز"}
             </h2>
+
+            {/* Teacher Name Badge Requirement */}
+            {teacherName && (
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold text-secondary bg-secondary/10 px-3 py-1.5 rounded-xl border border-secondary/20 w-fit shadow-2xs">
+                <span>تحت إشراف الأستاذ:</span>
+                <span className="font-extrabold text-secondary">{teacherName}</span>
+              </div>
+            )}
 
             <p className="text-xs sm:text-sm text-on-surface-variant/90 leading-relaxed font-medium">
               مرحباً بك في منصتك التعليمية التفاعلية. استعرض الدورات المتاحة لك أدناه وابدأ رحلة التفوق والنجاح في شهادة البكالوريا.

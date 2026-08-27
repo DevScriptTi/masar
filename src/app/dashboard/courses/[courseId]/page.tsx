@@ -13,7 +13,7 @@ import {
   ActivityDoc,
 } from "@/src/lib/firebase/coursesService";
 import { fetchGroups } from "@/src/lib/firebase/groupsService";
-import { RealAssignmentSubmitter } from "@/src/components/student/RealAssignmentSubmitter";
+import { SocraticStationChat } from "@/src/components/student/SocraticStationChat";
 import { RealQuizTaker } from "@/src/components/student/RealQuizTaker";
 import { MathText } from "@/src/components/admin/activities/StudentPreview";
 import { formatPdfEmbedUrl, formatYouTubeUrl } from "@/src/lib/utils/formatters";
@@ -46,16 +46,17 @@ import {
   ListFilter,
 } from "lucide-react";
 
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 
 export default function StudentCoursePlayerPage({
   params,
 }: {
-  params: Promise<{ courseId: string }>;
+  params: Promise<{ courseId: string; activityId?: string }>;
 }) {
   const resolvedParams = use(params);
   const courseId = resolvedParams.courseId;
+  const routeActivityId = resolvedParams.activityId;
   const router = useRouter();
 
   const { user, userData, loading: authLoading } = useAuth();
@@ -67,6 +68,10 @@ export default function StudentCoursePlayerPage({
   const [expandedModuleIds, setExpandedModuleIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
+
+  // Time-Bound Access for Revoked Students Rule 3 & 4
+  const [isRevokedEnrollment, setIsRevokedEnrollment] = useState(false);
+  const [revokedAtDateStr, setRevokedAtDateStr] = useState<string | null>(null);
 
   // Task A & B: State Management for Modal Overlays & Fullscreen Toggle
   const [activeVideo, setActiveVideo] = useState<string | null>(null);
@@ -124,6 +129,25 @@ export default function StudentCoursePlayerPage({
 
     fetchCurrentSubmission();
   }, [user?.uid, activeActivityId]);
+
+  // Freshly fetch the full Activity document to guarantee complete stations array and isolation rules
+  useEffect(() => {
+    if (!activeActivityId) return;
+    const fetchFreshActivityDoc = async () => {
+      try {
+        const snap = await getDoc(doc(db, "activities", activeActivityId));
+        if (snap.exists()) {
+          const freshData = { id: snap.id, ...(snap.data() as Omit<ActivityDoc, "id">) };
+          setActivities((prev) =>
+            prev.map((act) => (act.id === activeActivityId ? freshData : act))
+          );
+        }
+      } catch (err) {
+        console.warn("Error fetching fresh activity document:", err);
+      }
+    };
+    fetchFreshActivityDoc();
+  }, [activeActivityId]);
 
   useEffect(() => {
     if (!courseId || authLoading) return;
@@ -205,6 +229,33 @@ export default function StudentCoursePlayerPage({
           return;
         }
 
+        // Check for Student Revoked Enrollment Rule 3 & 4
+        let isRevoked = false;
+        let revokedTimestamp: number | null = null;
+
+        if (studentUid) {
+          try {
+            const enrSnap = await getDocs(query(collection(db, "enrollments"), where("studentId", "==", studentUid)));
+            const matchedEnrDoc = enrSnap.docs.find((d) => {
+              const data = d.data();
+              return courseData.groupIds?.includes(data.groupId) || data.groupId === (courseData as any).groupId;
+            });
+
+            if (matchedEnrDoc) {
+              const eData = matchedEnrDoc.data();
+              if (eData.status === "revoked") {
+                isRevoked = true;
+                revokedTimestamp = eData.revokedAt || eData.updatedAt || Date.now();
+                setRevokedAtDateStr(new Date(revokedTimestamp!).toLocaleDateString("ar-EG"));
+              }
+            }
+          } catch (e) {
+            console.warn("Error checking enrollment revoked status:", e);
+          }
+        }
+
+        setIsRevokedEnrollment(isRevoked);
+
         // 2. Filter Modules by Visibility & Excluded Students
         const visibleModules = modulesData.filter((m) => {
           if (m.isVisible === false) return false;
@@ -215,13 +266,29 @@ export default function StudentCoursePlayerPage({
           return true;
         });
 
-        // 3. Filter Activities by Visibility & Excluded Students
+        // 3. Filter Activities by Visibility & Time-Bound Access (Rule 3)
         const visibleActivities = activitiesData.filter((a) => {
           if (a.isVisible === false) return false;
           if (a.excludedStudentIds && a.excludedStudentIds.includes(studentUid)) return false;
           if (a.groupIds && a.groupIds.length > 0 && !a.groupIds.some((gId) => studentTokens.includes(gId))) {
             return false;
           }
+
+          // Rule 3: Revoked students can only see lessons published before/at revocation date
+          if (isRevoked && revokedTimestamp) {
+            const actCreatedTime = a.createdAt
+              ? typeof a.createdAt === "number"
+                ? a.createdAt
+                : (a.createdAt as any).seconds
+                ? (a.createdAt as any).seconds * 1000
+                : Date.now()
+              : 0;
+
+            if (actCreatedTime > revokedTimestamp) {
+              return false;
+            }
+          }
+
           return true;
         });
 
@@ -233,8 +300,10 @@ export default function StudentCoursePlayerPage({
         const moduleIds = visibleModules.map((m) => m.id!).filter(Boolean);
         setExpandedModuleIds(moduleIds);
 
-        // Auto-select first available activity
-        if (visibleActivities.length > 0) {
+        // Auto-select requested route activity or first available activity
+        if (routeActivityId && visibleActivities.some((a) => a.id === routeActivityId)) {
+          setActiveActivityId(routeActivityId);
+        } else if (visibleActivities.length > 0) {
           setActiveActivityId(visibleActivities[0].id!);
         }
       } catch (error) {
@@ -384,7 +453,7 @@ export default function StudentCoursePlayerPage({
                             }`}
                         >
                           <div className="flex items-center gap-2 truncate">
-                            {getActivityIcon(act.type)}
+                            {getActivityIcon(act.type || "")}
                             <span className="truncate">{act.title}</span>
                           </div>
 
@@ -407,11 +476,11 @@ export default function StudentCoursePlayerPage({
   return (
     <div className="min-h-screen bg-background text-on-background font-sans selection:bg-primary/20" dir="rtl">
       {/* Top Navbar Navigation */}
-      <header className="sticky top-0 z-30 bg-surface/85 backdrop-blur-xl border-b border-outline/15 px-4 sm:px-8 py-3.5 flex items-center justify-between gap-4">
-        {/* Task B: Scrollable Breadcrumb Links for Mobile */}
+      <header className="sticky top-0 z-30 bg-surface/85 backdrop-blur-xl border-b border-outline/15 px-4 sm:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-4">
+        {/* Full Breadcrumb Trail for Desktop / Tablet */}
         <nav
           aria-label="Breadcrumb"
-          className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant overflow-x-auto whitespace-nowrap scrollbar-hide flex-1 min-w-0 mr-2"
+          className="hidden sm:flex items-center gap-2 text-xs font-semibold text-on-surface-variant overflow-x-auto whitespace-nowrap scrollbar-hide flex-1 min-w-0 mr-2"
         >
           <Link href="/dashboard" className="hover:text-primary hover:underline transition-colors shrink-0 flex items-center gap-1">
             <ArrowRight className="w-4 h-4" />
@@ -431,8 +500,17 @@ export default function StudentCoursePlayerPage({
           )}
         </nav>
 
+        {/* Compact Mobile Back Button (Only visible on small mobile screens) */}
+        <Link
+          href="/dashboard"
+          className="flex sm:hidden items-center gap-1.5 text-xs font-bold text-on-surface-variant hover:text-primary transition-colors py-0.5"
+        >
+          <ArrowRight className="w-4 h-4 text-primary" />
+          <span>لوحة التحكم</span>
+        </Link>
+
         {/* Global Icons (Shrink-0 to prevent squishing on small screens) */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
           <NotificationBell />
           <ThemeToggle />
         </div>
@@ -440,6 +518,20 @@ export default function StudentCoursePlayerPage({
 
       {/* Main Student Player Workspace */}
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        {/* Revoked Enrollment Time-Bound Access Banner Rule 4 */}
+        {isRevokedEnrollment && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center justify-between gap-3 shadow-xs animate-fadeIn">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-400 animate-pulse" />
+              <span>
+                أنت لم تعد عضواً نشطاً في هذا الفوج. يمكنك فقط تصفح الدروس القديمة{revokedAtDateStr ? ` المنشورة قبل تاريخ (${revokedAtDateStr})` : ""}.
+              </span>
+            </div>
+            <span className="px-3 py-1 rounded-xl bg-amber-500/20 text-[11px] font-black shrink-0">
+              وصول أرشفة تاريخية ⏳
+            </span>
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Side Module Navigation Panel (Desktop Side-by-Side: 4 cols) */}
           <aside className="hidden lg:block lg:col-span-4 bg-surface border border-outline/15 rounded-3xl p-5 shadow-sm space-y-4 lg:sticky lg:top-20">
@@ -464,7 +556,7 @@ export default function StudentCoursePlayerPage({
                 <div className="bg-surface border border-outline/15 rounded-3xl p-6 shadow-sm space-y-4">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <span className="text-xs font-extrabold px-3 py-1 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center gap-1.5">
-                      {getActivityIcon(activeActivity.type)}
+                      {getActivityIcon(activeActivity.type || "")}
                       <span>
                         {activeActivity.type === "practice"
                           ? "تطبيق وتمرين"
@@ -474,7 +566,7 @@ export default function StudentCoursePlayerPage({
                       </span>
                     </span>
 
-                    <span className="text-xs text-on-surface-variant/80 font-bold">
+                    <span className="hidden sm:inline-block text-xs text-on-surface-variant/80 font-bold">
                       {course.title}
                     </span>
                   </div>
@@ -627,15 +719,21 @@ export default function StudentCoursePlayerPage({
                   </div>
                 )}
 
-                {/* Real Assignment Submitter (If required) */}
-                {activeActivity.requireSubmission && (
-                  <RealAssignmentSubmitter
+                {/* Socratic Station-by-Station AI Chat Interface */}
+                {activeActivity.id && (
+                  <SocraticStationChat
+                    key={activeActivity.id}
                     studentId={studentUid}
                     studentName={studentName}
                     studentEmail={studentEmail}
                     courseId={courseId}
-                    activityId={activeActivity.id!}
+                    activityId={activeActivity.id}
                     activityTitle={activeActivity.title}
+                    activityDescription={activeActivity.description}
+                    globalLatexSummary={activeActivity.globalLatexSummary}
+                    globalCustomIsolations={activeActivity.globalCustomIsolations}
+                    attachments={activeActivity.attachments || []}
+                    stations={activeActivity.stations || []}
                     onSubmissionUrlsChange={setCurrentSubmissionUrls}
                   />
                 )}
@@ -819,6 +917,7 @@ export default function StudentCoursePlayerPage({
         submissionId={currentSubmissionId}
         aiEvaluationCache={currentAiEvaluationCache}
         hiddenTeacherDirectives={activeActivity?.hiddenTeacherDirectives}
+        moduleId={activeActivity?.moduleId}
         latexContent={
           activeActivity?.attachments
             ? activeActivity.attachments

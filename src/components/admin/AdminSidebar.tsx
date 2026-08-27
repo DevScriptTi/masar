@@ -34,27 +34,27 @@ export function AdminSidebar() {
   const navItems = [
     {
       title: "لوحة القيادة",
-      href: "/admin/dashboard",
+      href: "/teacher/dashboard",
       icon: LayoutDashboard,
     },
     {
       title: "إدارة المفاتيح",
-      href: "/admin/keys",
+      href: "/teacher/keys",
       icon: KeyRound,
     },
     {
       title: "إدارة الأفواج",
-      href: "/admin/groups",
+      href: "/teacher/groups",
       icon: Users,
     },
     {
       title: "المسارات والدروس",
-      href: "/admin/courses",
+      href: "/teacher/courses",
       icon: BookOpen,
     },
     {
       title: "تصحيح التسليمات",
-      href: "/admin/evaluations",
+      href: "/teacher/evaluations",
       icon: ClipboardCheck,
     },
   ];
@@ -256,7 +256,13 @@ export function AdminSidebar() {
           <div className="h-[1px] bg-outline/10 w-full" />
 
           {/* User Profile Section */}
-          <div className={`rounded-2xl bg-surface-variant/40 border border-outline/10 transition-all duration-300 ${isRail ? "p-2 flex justify-center" : "p-3.5"}`}>
+          <Link
+            href="/settings"
+            title="تعديل الإعدادات والملف الشخصي"
+            className={`block rounded-2xl bg-surface-variant/40 hover:bg-surface-variant/70 border border-outline/10 hover:border-primary/30 transition-all duration-300 ${
+              isRail ? "p-2 flex justify-center" : "p-3.5"
+            }`}
+          >
             {loading ? (
               <div className="w-10 h-10 rounded-full bg-outline/20 animate-pulse" />
             ) : (
@@ -276,7 +282,7 @@ export function AdminSidebar() {
                 )}
               </div>
             )}
-          </div>
+          </Link>
 
           {/* Navigation Links Grid / Rail */}
           <nav className="space-y-2 pt-1">

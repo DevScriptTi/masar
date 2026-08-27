@@ -44,6 +44,7 @@ export interface AITutorWidgetProps {
   aiEvaluationCache?: any;
   submissionId?: string;
   hiddenTeacherDirectives?: string;
+  moduleId?: string;
 }
 
 // Baccalaureate Math Snippets using MathLive Placeholders (#0, #?)
@@ -100,6 +101,7 @@ export function AITutorWidget({
   aiEvaluationCache,
   submissionId,
   hiddenTeacherDirectives = "",
+  moduleId = "",
 }: AITutorWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
@@ -521,6 +523,7 @@ export function AITutorWidget({
           uploadedImages: forceVision ? imagesToEvaluate : [],
           studentImages: forceVision ? imagesToEvaluate : [],
           hiddenTeacherDirectives: hiddenTeacherDirectives || "",
+          moduleId: moduleId || "",
         }),
       });
 
@@ -663,7 +666,7 @@ export function AITutorWidget({
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
         aria-label="فتح المساعد الذكي"
-        className="fixed bottom-6 left-6 z-40 h-14 w-14 rounded-full bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-2xl hover:scale-105 transition-all flex items-center justify-center border border-primary/30 group"
+        className="fixed bottom-24 left-4 sm:bottom-6 sm:left-6 z-40 h-13 w-13 sm:h-14 sm:w-14 rounded-full bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-2xl hover:scale-105 transition-all flex items-center justify-center border border-primary/30 group"
       >
         {isOpen ? (
           <X className="w-6 h-6" />
@@ -813,6 +816,46 @@ export function AITutorWidget({
                   key={msg.id}
                   className={`flex flex-col ${isUser ? "items-start" : "items-end"} space-y-2 group`}
                 >
+                  {/* Tool Invocations Loading UI (e.g. getModuleSyllabus searching status) */}
+                  {(msg as any).toolInvocations && (msg as any).toolInvocations.length > 0 && (
+                    <div className="space-y-2 max-w-[90%] w-full">
+                      {(msg as any).toolInvocations.map((toolCall: any, tIdx: number) => {
+                        const isSyllabusTool = toolCall.toolName === "getModuleSyllabus";
+                        const isDone =
+                          "result" in toolCall ||
+                          toolCall.state === "result" ||
+                          toolCall.result !== undefined;
+
+                        if (!isDone) {
+                          return (
+                            <div
+                              key={toolCall.toolCallId || tIdx}
+                              className="p-3 rounded-2xl bg-primary/10 border border-primary/30 text-on-surface text-xs flex items-center gap-2.5 animate-pulse shadow-2xs"
+                            >
+                              <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                              </div>
+                              <span className="font-extrabold text-primary text-[11px]">
+                                {isSyllabusTool
+                                  ? "جاري مراجعة التدرج السنوي الوزاري والبحث عن القوانين..."
+                                  : "جاري البحث واستدعاء المعلومات المنهجية..."}
+                              </span>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={toolCall.toolCallId || tIdx}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold flex items-center gap-1.5 w-fit"
+                          >
+                            <span>تمت مراجعة المقرر بنجاح ✔️</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <div
                     className={`max-w-[90%] p-3.5 rounded-2xl text-xs font-medium leading-relaxed shadow-2xs ${isUser
                       ? "bg-primary text-on-primary rounded-tr-xs"

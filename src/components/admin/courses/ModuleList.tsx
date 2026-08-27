@@ -13,6 +13,10 @@ import {
 import { GroupDoc } from "@/src/lib/firebase/groupsService";
 import { MD3Switch } from "./MD3Switch";
 import { StudentExceptionsModal } from "@/src/components/admin/activities/StudentExceptionsModal";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import {
   ChevronDown,
   ChevronLeft,
@@ -77,6 +81,8 @@ export function ModuleList({
   const [editModuleTitle, setEditModuleTitle] = useState("");
   const [editModuleGroupIds, setEditModuleGroupIds] = useState<string[]>([]);
   const [editModuleExcludedStudentIds, setEditModuleExcludedStudentIds] = useState<string[]>([]);
+  const [editModuleIndexContext, setEditModuleIndexContext] = useState("");
+  const [editModuleDetailedLatex, setEditModuleDetailedLatex] = useState("");
   const [isUpdatingModule, setIsUpdatingModule] = useState(false);
   const [isModuleExceptionsModalOpen, setIsModuleExceptionsModalOpen] = useState(false);
   const [groupNotice, setGroupNotice] = useState(false);
@@ -87,7 +93,18 @@ export function ModuleList({
   const [editActivityType, setEditActivityType] = useState<"lesson" | "practice" | "exam">("lesson");
   const [editRequireSubmission, setEditRequireSubmission] = useState(false);
   const [editHasQuiz, setEditHasQuiz] = useState(false);
+  const [editActivityGroupIds, setEditActivityGroupIds] = useState<string[]>([]);
   const [isUpdatingActivity, setIsUpdatingActivity] = useState(false);
+
+  // Computed allowed activity groups for editing activity
+  const editingActivityParentModule = localModules.find((m) => m.id === editingActivity?.moduleId);
+  const editingActivityModuleGroupIds =
+    editingActivityParentModule?.groupIds && editingActivityParentModule.groupIds.length > 0
+      ? editingActivityParentModule.groupIds
+      : courseGroupIds;
+  const allowedActivityGroupsForEdit = allowedCourseGroups.filter((g) =>
+    editingActivityModuleGroupIds.includes(g.id!)
+  );
 
   useEffect(() => {
     setLocalModules(modules);
@@ -151,6 +168,8 @@ export function ModuleList({
     setEditModuleTitle(module.title);
     setEditModuleGroupIds(module.groupIds || courseGroupIds);
     setEditModuleExcludedStudentIds(module.excludedStudentIds || []);
+    setEditModuleIndexContext(module.moduleIndexContext || "");
+    setEditModuleDetailedLatex(module.moduleDetailedLatex || "");
   };
 
   const handleToggleModuleGroup = (gId: string) => {
@@ -176,6 +195,8 @@ export function ModuleList({
         title: editModuleTitle.trim(),
         groupIds: editModuleGroupIds,
         excludedStudentIds: editModuleExcludedStudentIds,
+        moduleIndexContext: editModuleIndexContext.trim(),
+        moduleDetailedLatex: editModuleDetailedLatex.trim(),
       });
       setEditingModule(null);
       onRefresh();
@@ -193,9 +214,16 @@ export function ModuleList({
     e.stopPropagation();
     setEditingActivity(activity);
     setEditActivityTitle(activity.title);
-    setEditActivityType(activity.type);
+    setEditActivityType(activity.type === "practice" ? "practice" : activity.type === "exam" ? "exam" : "lesson");
     setEditRequireSubmission(Boolean(activity.requireSubmission));
     setEditHasQuiz(Boolean(activity.hasQuiz));
+
+    const parentMod = localModules.find((m) => m.id === activity.moduleId);
+    const allowedForModule =
+      parentMod?.groupIds && parentMod.groupIds.length > 0 ? parentMod.groupIds : courseGroupIds;
+    setEditActivityGroupIds(
+      activity.groupIds && activity.groupIds.length > 0 ? activity.groupIds : allowedForModule
+    );
   };
 
   const handleSaveActivityEdit = async (e: FormEvent) => {
@@ -209,6 +237,7 @@ export function ModuleList({
         type: editActivityType,
         requireSubmission: editRequireSubmission,
         hasQuiz: editHasQuiz,
+        groupIds: editActivityGroupIds,
       });
       setEditingActivity(null);
       onRefresh();
@@ -342,7 +371,7 @@ export function ModuleList({
                           className="group relative p-4 rounded-2xl bg-surface-variant/30 border border-outline/10 flex items-center justify-between gap-4 hover:bg-surface-variant/60 hover:border-primary/30 transition-all duration-200"
                         >
                           <Link
-                            href={`/admin/courses/${courseId}/activities/${act.id}`}
+                            href={`/teacher/courses/${courseId}/activities/${act.id}`}
                             className="flex items-center gap-3.5 flex-1 min-w-0"
                           >
                             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${badgeStyle}`}>
@@ -556,6 +585,79 @@ export function ModuleList({
                 )}
               </div>
 
+              {/* AI Context Settings Section for Module */}
+              <div className="space-y-4 pt-3 border-t border-outline/10">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  <h3 className="text-xs font-extrabold text-on-surface">
+                    إعدادات سياق المساعد الذكي للوحدة
+                  </h3>
+                </div>
+
+                {/* Field 1: The Permanent Index */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant">
+                    الفهرس المختصر للوحدة (سياق دائم)
+                  </label>
+                  <textarea
+                    value={editModuleIndexContext}
+                    onChange={(e) => setEditModuleIndexContext(e.target.value)}
+                    rows={3}
+                    placeholder="اكتب رؤوس أقلام الفهرس وسياق هذه الوحدة..."
+                    disabled={isUpdatingModule}
+                    className="w-full p-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs sm:text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all resize-none font-medium"
+                  />
+                  <p className="text-[11px] text-on-surface-variant/70">
+                    اكتب رؤوس أقلام فقط عن محتوى هذه الوحدة. هذا النص سيرافق التلميذ دائماً أثناء دراسته لدروس هذه الوحدة.
+                  </p>
+                </div>
+
+                {/* Field 2: The Detailed Content (LaTeX) */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant">
+                    المحتوى التفصيلي للوحدة (للاستدعاء عند الحاجة)
+                  </label>
+                  <textarea
+                    value={editModuleDetailedLatex}
+                    onChange={(e) => setEditModuleDetailedLatex(e.target.value)}
+                    rows={5}
+                    placeholder="اكتب القوانين والتفاصيل الخاصة بهذه الوحدة باستخدام أكواد LaTeX..."
+                    disabled={isUpdatingModule}
+                    dir="ltr"
+                    className="w-full p-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-left font-mono text-xs focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all resize-y"
+                  />
+                  <p className="text-[11px] text-on-surface-variant/70">
+                    اكتب القوانين والتفاصيل الخاصة بهذه الوحدة باستخدام أكواد LaTeX. لن يراه الذكاء الاصطناعي إلا إذا استدعى أداة البحث.
+                  </p>
+
+                  {/* Live Preview Box */}
+                  {editModuleDetailedLatex.trim() && (
+                    <div className="mt-3 p-4 rounded-2xl bg-surface border border-primary/20 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between border-b border-outline/10 pb-1.5">
+                        <span className="text-[11px] font-extrabold text-primary flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>معاينة حية للرموز الرياضية (Live Preview)</span>
+                        </span>
+                        <span className="text-[9px] font-bold text-on-surface-variant">
+                          مكتبة KaTeX المباشرة
+                        </span>
+                      </div>
+                      <div className="text-xs text-on-surface leading-relaxed max-h-48 overflow-y-auto p-2 bg-surface-variant/20 rounded-xl" dir="rtl">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkMath]}
+                          rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+                          components={{
+                            p: ({ children }) => <p className="my-1">{children}</p>,
+                          }}
+                        >
+                          {editModuleDetailedLatex}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="pt-2 flex items-center gap-3">
                 <button
                   type="button"
@@ -643,6 +745,59 @@ export function ModuleList({
                   <option value="practice">تطبيق / تمرين (Practice)</option>
                   <option value="exam">امتحان / تقييم (Exam)</option>
                 </select>
+              </div>
+
+              {/* General Isolation: Groups Selection */}
+              <div className="p-4 rounded-2xl bg-surface-variant/20 border border-outline/15 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-on-surface flex items-center gap-1.5">
+                    <Users className="w-4 h-4 text-primary" />
+                    <span>صلاحيات الرؤية والأفواج المتاحة</span>
+                  </span>
+                  {allowedActivityGroupsForEdit.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setEditActivityGroupIds(allowedActivityGroupsForEdit.map((g) => g.id!))}
+                      className="text-[11px] font-bold text-primary hover:underline"
+                    >
+                      تحديد جميع الأفواج
+                    </button>
+                  )}
+                </div>
+
+                {allowedActivityGroupsForEdit.length === 0 ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20">
+                    تنبيه: الفصل الأب غير مخصص لأي فوج بعد. يرجى تخصيص الأفواج للفصل أولاً.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {allowedActivityGroupsForEdit.map((g) => {
+                      const isSel = editActivityGroupIds.includes(g.id!);
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSel) {
+                              setEditActivityGroupIds(editActivityGroupIds.filter((id) => id !== g.id));
+                            } else {
+                              setEditActivityGroupIds([...editActivityGroupIds, g.id!]);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                            isSel
+                              ? "bg-primary text-on-primary border-primary shadow-xs"
+                              : "bg-surface text-on-surface border-outline/20 hover:border-primary/40"
+                          }`}
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                          <span>{g.name}</span>
+                          {isSel && <CheckCircle2 className="w-3.5 h-3.5 stroke-[3]" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2 pt-1">

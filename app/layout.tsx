@@ -3,6 +3,7 @@ import { Cairo } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { AuthProvider } from "@/context/AuthContext";
+import { Toaster } from "@/src/components/ui/toaster";
 
 const cairo = Cairo({
   subsets: ["arabic", "latin"],
@@ -27,6 +28,7 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthProvider>
             {children}
+            <Toaster />
           </AuthProvider>
         </ThemeProvider>
       </body>

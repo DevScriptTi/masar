@@ -10,7 +10,9 @@ import {
   query,
   where,
   getDocs,
+  getDoc,
   doc,
+  addDoc,
   writeBatch,
   serverTimestamp,
 } from "firebase/firestore";
@@ -100,26 +102,55 @@ export default function KeyActivationPage() {
         return;
       }
 
-      const targetGroupId = keyData.groupId;
+      let targetGroupId = keyData.groupId;
       if (!targetGroupId) {
         setErrorMessage("حدث خطأ في بيانات الرمز. يرجى التواصل مع الدعم الفني.");
         setIsActivating(false);
         return;
       }
 
-      // 3. Perform Batch Write to update User enrollments and mark Key as 'used'
+      // Requirement 3: Resolve targetGroupId to strict Firestore Document ID if needed
+      try {
+        const grpSnap = await getDoc(doc(db, "groups", targetGroupId));
+        if (!grpSnap.exists()) {
+          const grpByNameSnap = await getDocs(
+            query(collection(db, "groups"), where("name", "==", targetGroupId))
+          );
+          if (!grpByNameSnap.empty) {
+            targetGroupId = grpByNameSnap.docs[0].id;
+          }
+        }
+      } catch (err) {
+        console.warn("Group ID resolution warning on activation:", err);
+      }
+
+      const targetTeacherId = keyData.teacherId || keyData.createdBy || null;
+
+      // 3. Create Enrollment Document in top-level 'enrollments' collection Requirement 2 & 3
+      const enrollmentsRef = collection(db, "enrollments");
+      await addDoc(enrollmentsRef, {
+        studentId: user.uid,
+        teacherId: targetTeacherId,
+        groupId: targetGroupId, // Strict Firestore Document ID string
+        joinedAt: Date.now(),
+        status: "active",
+        keyUsed: cleanKey,
+      });
+
+      // 4. Update User Document & Burn Key in Batch Write
       const batch = writeBatch(db);
 
-      // Update user document
       const userDocRef = doc(db, "users", user.uid);
       batch.update(userDocRef, {
+        groupId: targetGroupId,
+        ...(targetTeacherId ? { teacherId: targetTeacherId } : {}),
         [`enrollments.${targetGroupId}`]: {
           keyUsed: cleanKey,
           enrolledAt: serverTimestamp(),
         },
       });
 
-      // Update activation key document
+      // Update activation key document status to 'used' & usedBy to student UID
       const keyDocRef = doc(db, "activation_keys", keyDocId);
       batch.update(keyDocRef, {
         status: "used",
@@ -128,6 +159,23 @@ export default function KeyActivationPage() {
       });
 
       await batch.commit();
+
+      // 5. Send Notification to Teacher Requirement 3
+      if (targetTeacherId) {
+        try {
+          await addDoc(collection(db, "notifications"), {
+            userId: targetTeacherId,
+            title: "تلميذ جديد انضم للفوج 🎉",
+            message: `انضم التلميذ "${userData?.fullName || userData?.displayName || user.displayName || "طالب"}" إلى فوجك بنجاح.`,
+            type: "info",
+            href: `/teacher/groups/${targetGroupId}`,
+            isRead: false,
+            createdAt: serverTimestamp(),
+          });
+        } catch (notifErr) {
+          console.error("Error sending teacher notification:", notifErr);
+        }
+      }
 
       setSuccessMessage("تم تفعيل مفتاح الوصول بنجاح! تم منحك صلاحية الوصول للدورة والأفواج التعليمية المخصصة.");
       setActivationKey("");

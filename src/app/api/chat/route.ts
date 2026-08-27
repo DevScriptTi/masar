@@ -1,6 +1,113 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { streamText } from "ai";
+import { streamText, tool, stepCountIs } from "ai";
+import { z } from "zod";
 import { getStudentMasterProfile } from "@/lib/firebase/masterProfile";
+import { getModuleById } from "@/src/lib/firebase/coursesService";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase/config";
+
+// Resolve Space-Time Breadcrumbs Header (Requirement 2)
+async function resolveBreadcrumbsHeader(body: any, data: any): Promise<string> {
+  let courseTitle = body.courseTitle || body.courseName || (data && (data.courseTitle || data.courseName)) || "";
+  let moduleTitle = body.moduleTitle || body.moduleName || (data && (data.moduleTitle || data.moduleName)) || "";
+  let activityTitle = body.activityTitle || body.activityName || body.lessonContext || (data && (data.activityTitle || data.activityName || data.lessonContext)) || "";
+  let stationTitle = body.stationTitle || (body.currentStation && body.currentStation.title) || (data && (data.stationTitle || (data.currentStation && data.currentStation.title))) || "";
+
+  const courseId = body.courseId || (data && data.courseId);
+  const moduleId = body.moduleId || (data && data.moduleId);
+  const activityId = body.activityId || (data && data.activityId);
+
+  if ((!courseTitle && courseId) || (!moduleTitle && moduleId) || (!activityTitle && activityId)) {
+    try {
+      const [cSnap, mSnap, aSnap] = await Promise.all([
+        courseId ? getDoc(doc(db, "courses", courseId)) : Promise.resolve(null),
+        moduleId ? getDoc(doc(db, "modules", moduleId)) : Promise.resolve(null),
+        activityId ? getDoc(doc(db, "activities", activityId)) : Promise.resolve(null),
+      ]);
+
+      if (!courseTitle && cSnap && cSnap.exists()) courseTitle = cSnap.data().title || "";
+      if (!moduleTitle && mSnap && mSnap.exists()) moduleTitle = mSnap.data().title || "";
+      if (!activityTitle && aSnap && aSnap.exists()) activityTitle = aSnap.data().title || "";
+    } catch (err) {
+      console.warn("Breadcrumbs Firestore fetch error:", err);
+    }
+  }
+
+  const finalCourse = courseTitle.trim() || "مادة الرياضيات";
+  const finalModule = moduleTitle.trim() || "الوحدة التعلمية";
+  const finalActivity = activityTitle.trim() || "النشاط التعليمي";
+  const finalStation = stationTitle.trim() || "عام";
+
+  return `[التموضع الحالي للتلميذ]: مسار: ${finalCourse} > وحدة: ${finalModule} > نشاط: ${finalActivity} > محطة: ${finalStation}`;
+}
+
+// Resolve Student Cohort / Group IDs for Isolation (Requirement 3)
+async function resolveStudentCohortIds(studentId: string, providedCohortIds?: string[]): Promise<string[]> {
+  if (Array.isArray(providedCohortIds) && providedCohortIds.length > 0) {
+    return providedCohortIds;
+  }
+  if (!studentId) return [];
+
+  try {
+    const uSnap = await getDoc(doc(db, "users", studentId.trim()));
+    if (uSnap.exists()) {
+      const uData = uSnap.data();
+      const groupIds = uData.groupIds || uData.cohortIds || uData.groups || [];
+      if (Array.isArray(groupIds)) return groupIds;
+    }
+  } catch (err) {
+    console.warn("Error fetching student cohorts for isolation:", err);
+  }
+  return [];
+}
+
+// Backend-Resolved Deep Isolation Engine (Requirement 3)
+function resolveIsolationDirectives(
+  isolationRules: any[],
+  studentId: string,
+  cohortIds: string[]
+): string[] {
+  if (!Array.isArray(isolationRules) || isolationRules.length === 0) {
+    return [];
+  }
+
+  const resolvedDirectives: string[] = [];
+
+  for (const rule of isolationRules) {
+    if (!rule) continue;
+
+    const targetType = rule.targetType || rule.targetAudience;
+    const targetId = rule.targetId;
+    const sIds = rule.studentIds || rule.isolatedStudentIds || rule.targetIds || [];
+    const gIds = rule.groupIds || rule.cohortIds || rule.targetGroupIds || [];
+    const directiveText = (
+      rule.directive ||
+      rule.specificContextNote ||
+      rule.stationContextNote ||
+      rule.note ||
+      ""
+    ).trim();
+
+    if (!directiveText) continue;
+
+    const isAll = targetType === "all" || targetType === "everyone";
+    const isStudentMatch =
+      targetType === "student"
+        ? targetId === studentId || sIds.includes(studentId)
+        : targetId === studentId || sIds.includes(studentId);
+
+    const isCohortMatch =
+      targetType === "cohort"
+        ? (targetId && cohortIds.includes(targetId)) || gIds.some((g: string) => cohortIds.includes(g))
+        : gIds.some((g: string) => cohortIds.includes(g));
+
+    if (isAll || isStudentMatch || isCohortMatch) {
+      resolvedDirectives.push(directiveText);
+    }
+  }
+
+  return Array.from(new Set(resolvedDirectives));
+}
 
 // Resilient server-side image fetch helper using Vercel AI SDK "file" content part (non-deprecated)
 async function fetchImagePart(url: string, index: number): Promise<any> {
@@ -82,6 +189,7 @@ export async function POST(req: Request) {
       aiEvaluationCache,
       forceVision,
       hiddenTeacherDirectives,
+      moduleId,
       data,
     } = body;
 
@@ -91,6 +199,11 @@ export async function POST(req: Request) {
       userId ||
       studentId ||
       (data && (data.userId || data.studentId)) ||
+      "";
+
+    const targetModuleId =
+      moduleId ||
+      (data && data.moduleId) ||
       "";
 
     const teacherDirectivesStr =
@@ -253,8 +366,190 @@ ${aggregatedLatex}
       systemPrompt += `\n\n8. صور حل التلميذ المرفقة: لقد طلب التلميذ مراجعة صور إجابته بصرياً المرفقة (${imagesPayload.length} صورة). عند الإشارة إلى أي صورة أو خطأ فيها، استخدم التنسيق الحرفي الحصري التالي فقط: [الصورة X](#image-X) حيث X هو رقم الصورة الحقيقي (من 1 إلى ${imagesPayload.length}).`;
     }
 
+    // Resolve Cohort/Group IDs for targetUserId (Requirement 3)
+    const cohortIds = await resolveStudentCohortIds(
+      targetUserId,
+      body.cohortIds || body.groupIds || (data && (data.cohortIds || data.groupIds))
+    );
+
+    // Resolve Space-Time Breadcrumbs Header (Requirement 2)
+    const breadcrumbsHeader = await resolveBreadcrumbsHeader(body, data);
+
+    // Station Mode Check & System Log Injection
+    const isStationChat = Boolean(
+      body.isStationMode ||
+      body.stationMode ||
+      body.currentStation ||
+      (data && (data.isStationMode || data.stationMode || data.currentStation))
+    );
+
+    // Extract attachments metadata payload Requirement 3
+    const attachmentsPayload: any[] =
+      Array.isArray(attachments) && attachments.length > 0
+        ? attachments
+        : Array.isArray(body.activityAttachments)
+        ? body.activityAttachments
+        : data && Array.isArray(data.attachments)
+        ? data.attachments
+        : [];
+
+    let formattedAttachmentsMetadata = "- لا توجد مرفقات حالياً.";
+    if (attachmentsPayload.length > 0) {
+      formattedAttachmentsMetadata = attachmentsPayload
+        .map((a: any) => {
+          const titleStr = typeof a === "string" ? a : a.title || a.name || a.filename || "ملف مرفق";
+          const typeStr = typeof a === "object" && a.type ? a.type : typeof a === "string" && a.includes("video") ? "فيديو" : "مستند/PDF";
+          return `- ملف: ${titleStr} (نوع: ${typeStr})`;
+        })
+        .join("\n");
+    }
+
+    if (isStationChat) {
+      const actGlobalContext =
+        body.globalContext ||
+        body.globalLatexSummary ||
+        (body.activity && (body.activity.globalContext || body.activity.globalLatexSummary)) ||
+        (data && (data.globalContext || data.globalLatexSummary)) ||
+        lessonSummary ||
+        "لا يوجد سياق عام محدد.";
+
+      const stationData =
+        body.currentStation ||
+        (data && data.currentStation) || {
+          title: body.stationTitle || "المحطة الحالية",
+          content: body.stationContent || "حل التمرين المطلوب",
+          aiDirectives: body.stationAiDirectives || teacherDirectivesStr || "",
+          customIsolations: body.stationCustomIsolations || [],
+        };
+
+      // Backend-Resolved Deep Isolation Filtering (Requirement 3)
+      const rawGlobalIsolations =
+        body.globalCustomIsolations ||
+        body.isolationRules ||
+        (body.activity && body.activity.globalCustomIsolations) ||
+        (data && (data.globalCustomIsolations || data.isolationRules || (data.activity && data.activity.globalCustomIsolations))) ||
+        [];
+
+      const rawStationIsolations =
+        stationData.customIsolations ||
+        body.stationCustomIsolations ||
+        (data && (data.stationCustomIsolations || (data.currentStation && data.currentStation.customIsolations))) ||
+        [];
+
+      const combinedIsolationRules = [
+        ...(Array.isArray(rawGlobalIsolations) ? rawGlobalIsolations : []),
+        ...(Array.isArray(rawStationIsolations) ? rawStationIsolations : []),
+      ];
+
+      const resolvedDirectives = resolveIsolationDirectives(combinedIsolationRules, targetUserId, cohortIds);
+
+      // Also check fallback single-note strings if no rules array matched
+      if (resolvedDirectives.length === 0) {
+        if (body.globalIsolationNote) resolvedDirectives.push(body.globalIsolationNote);
+        if (body.stationIsolationNote) resolvedDirectives.push(body.stationIsolationNote);
+      }
+
+      const isolationSection =
+        resolvedDirectives.length > 0
+          ? `[العزل المخصص لهذا التلميذ]:\n${resolvedDirectives.map((d) => `- ${d}`).join("\n")}`
+          : `[العزل المخصص لهذا التلميذ]: لا توجد توجيهات مخصصة لهذا التلميذ.`;
+
+      systemPrompt = `
+${breadcrumbsHeader}
+
+[SYSTEM LOG - INITIALIZATION]
+أنت "وكيل المحطات السقراطي" التابع للأستاذ فوزي. التلميذ الذي أمامك هو: ${studentDisplayName}.
+
+--- إعدادات النشاط العام ---
+${actGlobalContext}
+
+--- [العزل المخصص لهذا التلميذ] ---
+${isolationSection}
+
+[2. المهمة الحالية (${stationData.title || "المحطة الحالية"})]:
+العنوان: ${stationData.title || "المحطة الحالية"}
+الهدف: ${stationData.content || "حل المطلوب وتزويد المساعد بإجابتك"}
+التوجيه السري للمعلم: ${stationData.aiDirectives || "لا يوجد."}
+
+المحتوى والمرفقات المتوفرة للتلميذ في هذه الصفحة:
+${formattedAttachmentsMetadata}
+
+توجيه خاص للمرفقات: أنت تعلم ما هي المرفقات الموجودة في الصفحة من خلال السياق أعلاه. لا تخترع مرفقات غير موجودة، وأرشد التلميذ لفتحها إذا سأل عنها.
+
+[RULES]
+1. لا تقدم الحلول الجاهزة أبداً.
+2. قيّم أي صورة يرسلها التلميذ بناءً على التوجيه السري للمحطة حصراً.
+3. لا تنتقل لطلب مهام المحطة التالية؛ ركز فقط على المحطة الحالية.
+4. إياك واستخدام روابط Markdown للصور مثل [الصورة](#image-1). أشار للصور بالحديث عنها طبيعياً في النص (مثال: 'في محاولتك المرفقة').
+5. إذا أردت اختبار التلميذ بسؤال أو تمرين، اطرح السؤال طبيعياً بنص عادي وبسيط دون استخدام أكواد JSON أو كتل كود.
+`.trim();
+    } else {
+      // Non-station mode: prepend breadcrumbs and resolved isolation directives to system prompt
+      const rawGlobalIsolations =
+        body.globalCustomIsolations ||
+        body.isolationRules ||
+        (body.activity && body.activity.globalCustomIsolations) ||
+        (data && (data.globalCustomIsolations || data.isolationRules)) ||
+        [];
+
+      const resolvedDirectives = resolveIsolationDirectives(rawGlobalIsolations, targetUserId, cohortIds);
+      const isolationSection =
+        resolvedDirectives.length > 0
+          ? `[العزل المخصص لهذا التلميذ]:\n${resolvedDirectives.map((d) => `- ${d}`).join("\n")}`
+          : `[العزل المخصص لهذا التلميذ]: لا توجد توجيهات مخصصة لهذا التلميذ.`;
+
+      systemPrompt = `${breadcrumbsHeader}\n\n${isolationSection}\n\n${systemPrompt}`;
+    }
+
+    const technicalDirectives = `
+=== توجيهات تنسيقية تقنية صارمة (يجب الالتزام بها حرفياً) ===
+1. **تنسيق النهايات (Limits):** عند كتابة أي نهاية رياضية، يُمنع منعاً باتاً استخدام الصيغة المختصرة \\lim_{x \\to a}. يجب عليك دائماً وحصرياً استخدام الصيغة: \\lim\\limits_{x \\to a} لضمان ظهورها بشكل سليم في الواجهة.
+2. **الإشارة للصور المرفقة:** التلميذ أرفق صوراً لحله. عندما تشير إلى هذه الصور في ردك، استخدم كلمات عادية مثل "في صورتك الأولى" أو "في الحل المرفق". يُمنع منعاً باتاً استخدام أي روابط ماركداون (Markdown Links) للصور مثل [الصورة 1](#) أو محاولة تضمين رابط الصورة. فقط أشر إليها نصياً.
+`.trim();
+
+    systemPrompt += `\n\n${technicalDirectives}`;
+
+    // Backend Audit Logger: Print exact assembled System Prompt to server terminal
+    console.log("\n========== [SYSTEM PROMPT DEBUG START] ==========");
+    console.log(systemPrompt);
+    console.log("========== [SYSTEM PROMPT DEBUG END] ==========\n");
+
+    // Reference Images Injection (Teacher's Official Reference Diagrams / Graphs)
+    const referenceImageUrlsPayload: string[] =
+      Array.isArray(body.referenceImageUrls) && body.referenceImageUrls.length > 0
+        ? body.referenceImageUrls
+        : data && Array.isArray(data.referenceImageUrls)
+        ? data.referenceImageUrls
+        : [];
+
+    const referenceMessages: any[] = [];
+    if (referenceImageUrlsPayload.length > 0) {
+      const refPartsPromises = referenceImageUrlsPayload.map((url, idx) => fetchImagePart(url, idx));
+      const resolvedRefParts = await Promise.all(refPartsPromises);
+      const validRefParts = resolvedRefParts.filter(Boolean);
+
+      if (validRefParts.length > 0) {
+        referenceMessages.push(
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `[الصور المرجعية المعتمدة من أستاذ المادة للدرس/النشاط]: هذه ${validRefParts.length} صور مرجعية معتمدة (رسومات بيانية، منحنيات دالة، أو أشكال هندسية) تابعة للنشاط. اعتمد عليها وافحصها بدقة إذا سأل التلميذ عنها أو تطلب التمرين تحليلها:`,
+              },
+              ...validRefParts,
+            ],
+          },
+          {
+            role: "assistant",
+            content: "فهمت. قمت بقراءة وحفظ الصور المرجعية المعتمدة من الأستاذ، وسأعتمد عليها حصرياً في توجيه التلميذ وتحليل منحنيات ورسومات التمرين.",
+          }
+        );
+      }
+    }
+
     // Fast Payload vs Multimodal Vision Payload
-    const promptMessages = [...baseMessages];
+    const promptMessages = [...referenceMessages, ...baseMessages];
     if (shouldIncludeImages) {
       const lastUserIdx = promptMessages.map((m) => m.role).lastIndexOf("user");
       if (lastUserIdx !== -1) {
@@ -282,7 +577,47 @@ ${aggregatedLatex}
       }
     }
 
-    // Primary Model -> Fallback Model Sequence (gemini-3.1-flash-lite -> gemini-2.5-flash-lite -> gemini-3.5-flash)
+    // Dynamic Tool Definition: getModuleSyllabus
+    const chatTools = {
+      getModuleSyllabus: tool({
+        description:
+          "استخدم هذه الأداة حصرياً عندما يسأل التلميذ سؤالاً شمولياً يتطلب منك مراجعة التدرج السنوي الوزاري أو القوانين التفصيلية للوحدة الحالية.",
+        inputSchema: z.object({
+          reason: z.string().describe("سبب استدعاء أداة جلب محتوى الوحدة بالتفصيل"),
+        }),
+        execute: async ({ reason }) => {
+          console.log(
+            "🛠️ AI Executing getModuleSyllabus tool... Reason:",
+            reason,
+            "targetModuleId:",
+            targetModuleId
+          );
+          if (!targetModuleId) {
+            return "لا توجد وحدة محددة حالياً في سياق الجلسة.";
+          }
+
+          try {
+            const moduleDoc = await getModuleById(targetModuleId);
+            if (
+              !moduleDoc ||
+              !moduleDoc.moduleDetailedLatex ||
+              !moduleDoc.moduleDetailedLatex.trim()
+            ) {
+              return "لا يوجد محتوى تفصيلي إضافي مدون لهذه الوحدة في قاعدة البيانات.";
+            }
+
+            return `--- بداية التدرج السنوي والقوانين التفصيلية للوحدة ---
+${moduleDoc.moduleDetailedLatex.trim()}
+--- نهاية القوانين التفصيلية للوحدة ---`;
+          } catch (err: any) {
+            console.error("Error executing getModuleSyllabus tool:", err);
+            return "حدث خطأ أثناء جلب محتوى الوحدة من قاعدة البيانات.";
+          }
+        },
+      }),
+    };
+
+    // Primary Model -> Working Model (gemini-3.1-flash-lite)
     let result;
     let finalModelUsed = "gemini-3.1-flash-lite";
 
@@ -296,42 +631,15 @@ ${aggregatedLatex}
         model: customGoogle(finalModelUsed),
         system: systemPrompt,
         messages: promptMessages,
+        tools: chatTools,
+        stopWhen: stepCountIs(5),
       });
     } catch (primaryError: any) {
-      console.warn(
-        `⚠️ Primary model "${finalModelUsed}" failed. Triggering fallback to gemini-2.5-flash-lite... Error:`,
+      console.error(
+        `🚨 Primary model "${finalModelUsed}" failed:`,
         primaryError?.message || primaryError
       );
-
-      // Fallback Model 1
-      finalModelUsed = "gemini-2.5-flash-lite";
-      console.log(`🤖 Attempting streamText with fallback model: "${finalModelUsed}"...`);
-
-      try {
-        result = await streamText({
-          model: customGoogle(finalModelUsed),
-          system: systemPrompt,
-          messages: promptMessages,
-        });
-      } catch (fallbackError: any) {
-        console.warn(
-          `⚠️ Secondary model "${finalModelUsed}" failed. Attempting tertiary fallback (gemini-3.5-flash)... Error:`,
-          fallbackError?.message || fallbackError
-        );
-
-        // Fallback Model 2
-        finalModelUsed = "gemini-3.5-flash";
-        try {
-          result = await streamText({
-            model: customGoogle(finalModelUsed),
-            system: systemPrompt,
-            messages: promptMessages,
-          });
-        } catch (tertiaryError: any) {
-          console.error("🚨 All candidate models completely failed.");
-          throw tertiaryError;
-        }
-      }
+      throw primaryError;
     }
 
     console.log(`✅ Success streaming AI Tutor response with model "${finalModelUsed}"`);

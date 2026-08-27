@@ -9,6 +9,8 @@ import { auth, db } from "@/lib/firebase/config";
 import { ThemeToggle } from "@/src/components/ThemeToggle";
 import { LogIn, Lock, Mail, Eye, EyeOff, Loader2, GraduationCap, ShieldCheck } from "lucide-react";
 
+import { RoleSelectionModal } from "@/src/components/auth/RoleSelectionModal";
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -16,6 +18,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
 
   // Status & Error states
   const [loading, setLoading] = useState(false);
@@ -43,13 +46,19 @@ export default function LoginPage() {
       
       if (userDoc.exists()) {
         const role = userDoc.data().role;
-        if (role === "admin" || String(role).toLowerCase() === "admin") {
-          router.push("/admin/dashboard");
+        if (role === "super_admin" || String(role).toLowerCase() === "super_admin") {
+          router.push("/super-admin");
+        } else if (
+          role === "teacher" ||
+          role === "admin" ||
+          String(role).toLowerCase() === "teacher" ||
+          String(role).toLowerCase() === "admin"
+        ) {
+          router.push("/teacher/dashboard");
         } else {
           router.push("/dashboard");
         }
       } else {
-        // Fallback for user without Firestore document
         router.push("/dashboard");
       }
     } catch (error: any) {
@@ -192,18 +201,25 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Registration Link */}
+          {/* Registration Link Requirement 2 */}
           <div className="mt-4 text-center">
             <p className="text-xs text-on-surface-variant">
               ليس لديك حساب؟{" "}
-              <Link
-                href="/register"
-                className="text-primary font-bold hover:underline transition-colors"
+              <button
+                type="button"
+                onClick={() => setIsRoleModalOpen(true)}
+                className="text-primary font-bold hover:underline transition-colors cursor-pointer"
               >
                 إنشاء حساب جديد
-              </Link>
+              </button>
             </p>
           </div>
+
+          {/* Role Selection Dialog Modal Requirement 2 & 3 */}
+          <RoleSelectionModal
+            isOpen={isRoleModalOpen}
+            onClose={() => setIsRoleModalOpen(false)}
+          />
 
           {/* Footer note */}
           <div className="mt-6 pt-6 border-t border-outline/10 text-center">

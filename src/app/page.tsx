@@ -16,16 +16,21 @@ import {
   Sparkles,
 } from "lucide-react";
 
+import { RoleSelectionModal } from "@/src/components/auth/RoleSelectionModal";
+
 export default function RootLandingPage() {
   const { userData, loading } = useAuth();
   const router = useRouter();
+  const [isRoleModalOpen, setIsRoleModalOpen] = React.useState(false);
 
   // Dynamic Routing based on authentication state and user role
   useEffect(() => {
     if (!loading && userData) {
-      const role = userData.role;
-      if (role === "admin" || String(role).toLowerCase() === "admin") {
-        router.replace("/admin/dashboard");
+      const role = String(userData.role || "").toLowerCase().trim();
+      if (role === "super_admin") {
+        router.replace("/super-admin");
+      } else if (role === "teacher" || role === "admin" || userData.isAdmin === true) {
+        router.replace("/teacher/dashboard");
       } else {
         router.replace("/dashboard");
       }
@@ -123,16 +128,17 @@ export default function RootLandingPage() {
             </div>
           </div>
 
-          {/* CTA Buttons */}
+          {/* CTA Buttons Requirement 2 & 3 */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
-            {/* Primary Action Button: Register */}
-            <Link
-              href="/register"
-              className="w-full sm:w-auto h-13 px-8 rounded-2xl bg-primary text-on-primary font-bold text-sm hover:bg-primary/90 focus:outline-none focus:ring-4 focus:ring-primary/30 shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2.5 active:scale-[0.98]"
+            {/* Primary Action Button: Role Selection Modal Trigger */}
+            <button
+              type="button"
+              onClick={() => setIsRoleModalOpen(true)}
+              className="w-full sm:w-auto h-13 px-8 rounded-2xl bg-primary text-on-primary font-bold text-sm hover:bg-primary/90 focus:outline-none focus:ring-4 focus:ring-primary/30 shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2.5 active:scale-[0.98] cursor-pointer"
             >
               <UserPlus className="w-5 h-5" />
               <span>إنشاء حساب جديد</span>
-            </Link>
+            </button>
 
             {/* Outlined Action Button: Login */}
             <Link
@@ -143,6 +149,12 @@ export default function RootLandingPage() {
               <span>تسجيل الدخول</span>
             </Link>
           </div>
+
+          {/* Role Selection Modal */}
+          <RoleSelectionModal
+            isOpen={isRoleModalOpen}
+            onClose={() => setIsRoleModalOpen(false)}
+          />
         </div>
       </main>
 

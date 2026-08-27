@@ -10,12 +10,13 @@ import {
   orderBy,
   serverTimestamp,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+import { auth, db } from "@/lib/firebase/config";
 
 export interface ActivationKeyDoc {
   id?: string;
   key: string;
   groupId: string;
+  teacherId?: string;
   status: "active" | "used" | "disabled";
   usedBy: string | null;
   createdAt?: any;
@@ -32,14 +33,16 @@ function generateRandomCode(length: number = 5): string {
 }
 
 /**
- * Generate and batch-save activation keys to Firestore
+ * Generate and batch-save activation keys to Firestore with teacherId
  */
 export async function generateKeys(
   groupId: string,
-  quantity: number
+  quantity: number,
+  groupName?: string
 ): Promise<ActivationKeyDoc[]> {
-  const cleanGroupTag = groupId.trim().replace(/\s+/g, "_").toUpperCase();
+  const cleanTag = (groupName || groupId).trim().replace(/\s+/g, "_").toUpperCase().slice(0, 10);
   const validQuantity = Math.min(Math.max(quantity, 1), 50);
+  const currentUid = auth.currentUser?.uid;
 
   const batch = writeBatch(db);
   const keysCollection = collection(db, "activation_keys");
@@ -47,12 +50,13 @@ export async function generateKeys(
 
   for (let i = 0; i < validQuantity; i++) {
     const randomChars = generateRandomCode(5);
-    const keyCode = `BAC27-${cleanGroupTag}-${randomChars}`;
+    const keyCode = `BAC27-${cleanTag}-${randomChars}`;
     const newDocRef = doc(keysCollection);
 
     const keyData: Omit<ActivationKeyDoc, "id"> = {
       key: keyCode,
-      groupId: groupId.trim(),
+      groupId: groupId.trim(), // Strict Firestore document ID string
+      teacherId: currentUid || "admin",
       status: "active",
       usedBy: null,
       createdAt: serverTimestamp(),
@@ -67,19 +71,28 @@ export async function generateKeys(
 }
 
 /**
- * Fetch all activation keys from Firestore
+ * Fetch activation keys from Firestore (filtered by current teacherId if available)
  */
-export async function fetchKeys(): Promise<ActivationKeyDoc[]> {
+export async function fetchKeys(teacherId?: string): Promise<ActivationKeyDoc[]> {
   const keysCollection = collection(db, "activation_keys");
+  const currentTeacherId = teacherId || auth.currentUser?.uid;
 
   try {
     const q = query(keysCollection, orderBy("createdAt", "desc"));
     const querySnapshot = await getDocs(q);
 
-    return querySnapshot.docs.map((docSnap) => ({
+    const allKeys = querySnapshot.docs.map((docSnap) => ({
       id: docSnap.id,
       ...(docSnap.data() as Omit<ActivationKeyDoc, "id">),
     }));
+
+    if (currentTeacherId) {
+      return allKeys.filter(
+        (k) => !k.teacherId || k.teacherId === currentTeacherId
+      );
+    }
+
+    return allKeys;
   } catch (error) {
     console.warn("Index notice, fallback query for keys:", error);
     const querySnapshot = await getDocs(keysCollection);
@@ -88,64 +101,52 @@ export async function fetchKeys(): Promise<ActivationKeyDoc[]> {
       ...(docSnap.data() as Omit<ActivationKeyDoc, "id">),
     }));
 
-    return keys.sort((a, b) => {
+    const sorted = keys.sort((a, b) => {
       const timeA = a.createdAt?.seconds || 0;
       const timeB = b.createdAt?.seconds || 0;
       return timeB - timeA;
     });
+
+    if (currentTeacherId) {
+      return sorted.filter(
+        (k) => !k.teacherId || k.teacherId === currentTeacherId
+      );
+    }
+
+    return sorted;
   }
 }
 
 /**
  * Toggle key status between 'active' and 'disabled'.
- * Cannot toggle if key status is 'used'.
  */
 export async function toggleKeyStatus(
   keyId: string,
   currentStatus: "active" | "used" | "disabled"
 ): Promise<void> {
-  if (!keyId) return;
-  if (currentStatus === "used") {
-    throw new Error("لا يمكن تغيير حالة مفتاح مستعمل.");
-  }
-
+  if (currentStatus === "used") return;
   const newStatus = currentStatus === "active" ? "disabled" : "active";
   const keyDocRef = doc(db, "activation_keys", keyId);
   await updateDoc(keyDocRef, { status: newStatus });
 }
 
 /**
- * Safe Delete Key:
- * If key is 'used', uses a Batch Write to:
- * 1. Target users/${keyData.usedBy}
- * 2. Remove ONLY enrollments.${keyData.groupId} via deleteField() without deleting the user document.
- * 3. Delete the activation_key document.
- * If key is not 'used', deletes the key document directly.
+ * Delete a single key document permanently
  */
-export async function deleteKey(
-  keyId: string,
-  keyData: ActivationKeyDoc
-): Promise<void> {
-  if (!keyId) return;
-
-  if (keyData.status === "used" && keyData.usedBy) {
-    const batch = writeBatch(db);
-
-    // 1 & 2. Safely delete specific enrollment from user document
-    const userDocRef = doc(db, "users", keyData.usedBy);
-    batch.update(userDocRef, {
-      [`enrollments.${keyData.groupId}`]: deleteField(),
-    });
-
-    // 3. Delete activation key doc
-    const keyDocRef = doc(db, "activation_keys", keyId);
-    batch.delete(keyDocRef);
-
-    await batch.commit();
-  } else {
-    // Standard delete for unused keys
-    const keyDocRef = doc(db, "activation_keys", keyId);
-    await deleteDoc(keyDocRef);
-  }
+export async function deleteKey(keyId: string): Promise<void> {
+  const keyDocRef = doc(db, "activation_keys", keyId);
+  await deleteDoc(keyDocRef);
 }
 
+/**
+ * Delete multiple keys permanently in a single writeBatch
+ */
+export async function deleteBatchKeys(keyIds: string[]): Promise<void> {
+  if (!keyIds || keyIds.length === 0) return;
+  const batch = writeBatch(db);
+  keyIds.forEach((id) => {
+    const ref = doc(db, "activation_keys", id);
+    batch.delete(ref);
+  });
+  await batch.commit();
+}

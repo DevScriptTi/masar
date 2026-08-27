@@ -12,11 +12,20 @@ export interface HomeworkUploaderProps {
   onUploadSuccess: (urls: string[]) => void;
   currentUrls?: string[];
   currentUrl?: string; // Backwards compatibility
+  maxFiles?: number;
+  label?: string;
 }
 
-export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: HomeworkUploaderProps) {
+export function HomeworkUploader({
+  onUploadSuccess,
+  currentUrls,
+  currentUrl,
+  maxFiles,
+  label,
+}: HomeworkUploaderProps) {
   const [uploading, setUploading] = useState(false);
-  
+  const isSingleFile = maxFiles === 1;
+
   // Normalize initial URLs
   const initialList = currentUrls && currentUrls.length > 0
     ? currentUrls
@@ -42,18 +51,32 @@ export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: H
       setUploadedUrls(currentUrls);
     } else if (currentUrl) {
       setUploadedUrls([currentUrl]);
+    } else {
+      setUploadedUrls([]);
     }
   }, [currentUrls, currentUrl]);
 
   const isPdf = (url: string) => {
     if (!url) return false;
     const clean = url.toLowerCase().split("?")[0];
-    return clean.endsWith(".pdf") || clean.includes("/pdf/") || clean.startsWith("data:application/pdf");
+    return (
+      clean.endsWith(".pdf") ||
+      clean.includes("/pdf/") ||
+      clean.includes("format=pdf") ||
+      clean.startsWith("data:application/pdf") ||
+      clean.includes("resource_type=raw") ||
+      clean.includes("application/pdf") ||
+      clean.includes(".pdf")
+    );
   };
 
   const handleUploadFiles = async (files: FileList | File[]) => {
-    const fileArray = Array.from(files);
+    let fileArray = Array.from(files);
     if (fileArray.length === 0) return;
+
+    if (isSingleFile) {
+      fileArray = fileArray.slice(0, 1);
+    }
 
     // Check individual file sizes (max 20MB)
     const overSized = fileArray.some((f) => f.size > 20 * 1024 * 1024);
@@ -66,12 +89,15 @@ export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: H
     setError(null);
 
     const uploadSingleFile = async (file: File): Promise<string> => {
+      const isPDF = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      const resourceType = isPDF ? "raw" : "image";
+
       const formData = new FormData();
       formData.append("file", file);
       formData.append("upload_preset", uploadPreset);
 
       try {
-        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, {
+        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`, {
           method: "POST",
           body: formData,
         });
@@ -92,7 +118,7 @@ export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: H
 
     try {
       const newUrls = await Promise.all(fileArray.map((f) => uploadSingleFile(f)));
-      const updatedList = [...uploadedUrls, ...newUrls];
+      const updatedList = isSingleFile ? newUrls : [...uploadedUrls, ...newUrls];
       setUploadedUrls(updatedList);
       onUploadSuccess(updatedList);
     } catch (err: any) {
@@ -150,10 +176,14 @@ export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: H
     onUploadSuccess(updated);
   };
 
+  const defaultLabel = isSingleFile
+    ? "منطقة رفع الملف (PDF أو صورة). ارفع ملفاً واحداً فقط."
+    : "رفع وإدراج الملفات والمستندات (PDF / صور)";
+
   return (
     <div className="space-y-3" dir="rtl">
       <label className="block text-xs font-bold text-on-surface flex items-center justify-between">
-        <span>رفع وتصوير إجابة الواجب (يمكن اختيار عدة صور أو ملفات PDF) <span className="text-error">*</span></span>
+        <span>{label || defaultLabel} <span className="text-error">*</span></span>
         {uploadedUrls.length > 0 && (
           <span className="text-[11px] font-extrabold text-primary bg-primary/10 px-2.5 py-0.5 rounded-lg border border-primary/20">
             تم إرفاق {uploadedUrls.length} {uploadedUrls.length === 1 ? "ملف" : "ملفات/صور"}
@@ -161,11 +191,11 @@ export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: H
         )}
       </label>
 
-      {/* Hidden File Input with MULTIPLE attribute */}
+      {/* Hidden File Input */}
       <input
         ref={fileInputRef}
         type="file"
-        multiple
+        multiple={!isSingleFile}
         accept="image/*,application/pdf"
         onChange={handleChange}
         className="hidden"
@@ -184,16 +214,16 @@ export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: H
                   className="relative group rounded-xl overflow-hidden border border-outline/20 bg-surface shadow-2xs aspect-4/3 flex flex-col justify-between"
                 >
                   {pdf ? (
-                    <div className="w-full h-full flex flex-col items-center justify-center p-3 bg-amber-500/10 text-amber-500 text-center">
-                      <FileText className="w-8 h-8 mb-1" />
-                      <span className="text-[10px] font-bold text-on-surface truncate max-w-full">
-                        مستند PDF #{idx + 1}
+                    <div className="w-full h-full flex flex-col items-center justify-center p-3 bg-sky-500/10 text-sky-600 dark:text-sky-400 text-center rounded-xl border border-sky-500/20">
+                      <FileText className="w-8 h-8 mb-1.5" />
+                      <span className="text-[11px] font-extrabold text-on-surface truncate max-w-full px-2 dir-ltr" dir="ltr">
+                        {url.split("/").pop()?.split("?")[0] || `مستند PDF #${idx + 1}`}
                       </span>
                     </div>
                   ) : (
                     <img
                       src={url}
-                      alt={`صفحة الواجب #${idx + 1}`}
+                      alt={`ملف مرفق #${idx + 1}`}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
                   )}
@@ -241,19 +271,21 @@ export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: H
             })}
           </div>
 
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="w-full py-2.5 rounded-xl border border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-          >
-            {uploading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Plus className="w-4 h-4" />
-            )}
-            <span>إضافة المزيد من الصور أو ملفات الإجابة</span>
-          </button>
+          {!isSingleFile && (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="w-full py-2.5 rounded-xl border border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+            >
+              {uploading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
+              <span>إضافة المزيد من الصور أو ملفات الـ PDF</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -274,7 +306,7 @@ export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: H
           {uploading ? (
             <div className="space-y-2 py-2">
               <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
-              <p className="text-xs font-bold text-primary">جاري رفع الصور وحفظها سحابياً...</p>
+              <p className="text-xs font-bold text-primary">جاري رفع الملفات وحفظها سحابياً...</p>
             </div>
           ) : (
             <>
@@ -284,10 +316,13 @@ export function HomeworkUploader({ onUploadSuccess, currentUrls, currentUrl }: H
 
               <div className="space-y-1">
                 <p className="text-xs font-extrabold text-on-surface">
-                  انقر هنا لاختيار صور إجابتك (يمكن تحديد عدة صور) أو اسحبها إلى هنا
+                  منطقة رفع الملفات (PDF أو صور)
                 </p>
-                <p className="text-[11px] text-on-surface-variant/70 font-medium">
-                  يدعم التقط صور متعددة للدفتر (JPG, PNG) أو ملفات PDF بحجم يصل حتى 20MB لكل صورة
+                <p className="text-[11px] font-semibold text-on-surface-variant/90">
+                  انقر هنا لاختيار الملفات أو اسحبها إلى هنا.
+                </p>
+                <p className="text-[10px] text-on-surface-variant/60 font-medium">
+                  الحد الأقصى للملف 20MB.
                 </p>
               </div>
             </>

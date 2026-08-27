@@ -9,28 +9,32 @@ import {
   orderBy,
   serverTimestamp,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+import { auth, db } from "@/lib/firebase/config";
 
 export interface GroupDoc {
   id?: string;
   name: string;
   description: string;
+  teacherId?: string;
   studentCount?: number;
   status?: "active" | "archived";
   createdAt?: any;
 }
 
 /**
- * Create a new group in Firestore with status 'active'
+ * Create a new group in Firestore with status 'active' and auto teacherId
  */
 export async function createGroup(
   name: string,
   description: string
 ): Promise<string> {
   const groupsCollection = collection(db, "groups");
+  const currentUid = auth.currentUser?.uid;
+
   const docRef = await addDoc(groupsCollection, {
     name: name.trim(),
     description: description.trim(),
+    teacherId: currentUid || "admin",
     studentCount: 0,
     status: "active",
     createdAt: serverTimestamp(),
@@ -39,16 +43,17 @@ export async function createGroup(
 }
 
 /**
- * Fetch all groups from Firestore
+ * Fetch groups from Firestore (filtered by current teacherId if available)
  */
-export async function fetchGroups(): Promise<GroupDoc[]> {
+export async function fetchGroups(teacherId?: string): Promise<GroupDoc[]> {
   const groupsCollection = collection(db, "groups");
+  const currentTeacherId = teacherId || auth.currentUser?.uid;
 
   try {
     const q = query(groupsCollection, orderBy("createdAt", "desc"));
     const querySnapshot = await getDocs(q);
 
-    return querySnapshot.docs.map((docSnap) => {
+    const allGroups = querySnapshot.docs.map((docSnap) => {
       const data = docSnap.data();
       return {
         id: docSnap.id,
@@ -56,6 +61,14 @@ export async function fetchGroups(): Promise<GroupDoc[]> {
         status: data.status || "active",
       };
     });
+
+    if (currentTeacherId) {
+      return allGroups.filter(
+        (g) => !g.teacherId || g.teacherId === currentTeacherId
+      );
+    }
+
+    return allGroups;
   } catch (error) {
     console.warn("Index notice, fallback query for groups:", error);
     const querySnapshot = await getDocs(groupsCollection);
@@ -68,11 +81,19 @@ export async function fetchGroups(): Promise<GroupDoc[]> {
       };
     });
 
-    return groups.sort((a, b) => {
+    const sorted = groups.sort((a, b) => {
       const timeA = a.createdAt?.seconds || 0;
       const timeB = b.createdAt?.seconds || 0;
       return timeB - timeA;
     });
+
+    if (currentTeacherId) {
+      return sorted.filter(
+        (g) => !g.teacherId || g.teacherId === currentTeacherId
+      );
+    }
+
+    return sorted;
   }
 }
 
@@ -114,4 +135,3 @@ export async function deleteGroup(groupId: string): Promise<void> {
   const groupDocRef = doc(db, "groups", groupId);
   await deleteDoc(groupDocRef);
 }
-
