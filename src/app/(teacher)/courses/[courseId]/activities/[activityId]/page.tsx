@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, use, FormEvent } from "react";
+import React, { useState, useEffect, use, useRef, FormEvent } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -22,6 +22,8 @@ import {
 } from "@/src/lib/firebase/coursesService";
 import { HomeworkUploader } from "@/src/components/student/HomeworkUploader";
 import { TargetSelectionModal } from "@/src/components/admin/activities/TargetSelectionModal";
+import { InlineAIRefiner } from "@/src/components/admin/activities/InlineAIRefiner";
+import { generateContextAction, refineContextAction } from "@/actions/ai.actions";
 import { fetchGroups, GroupDoc } from "@/src/lib/firebase/groupsService";
 import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
@@ -31,7 +33,21 @@ import { StudentPreview, MathText } from "@/src/components/admin/activities/Stud
 import { StudentExceptionsModal } from "@/src/components/admin/activities/StudentExceptionsModal";
 import { ActivitySubmissionsList } from "@/src/components/admin/evaluations/ActivitySubmissionsList";
 import { RichTextEditor } from "@/src/components/admin/RichTextEditor";
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { useToast } from "@/src/components/ui/use-toast";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/src/components/ui/alert-dialog";
 import {
   ChevronLeft,
   Save,
@@ -71,6 +87,7 @@ import {
   ChevronDown,
   Wand2,
   Bot,
+  Send,
 } from "lucide-react";
 
 export interface StudentOption {
@@ -437,9 +454,47 @@ export default function ActivityEditorPage({
     { id: "settings", label: "التصريح والخيارات الإضافية", icon: SettingsIcon },
   ];
 
-  // Form States
+  // Form States & Unsaved Changes Guard
+  const [isDirty, setIsDirty] = useState(false);
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
+  const [pendingNavUrl, setPendingNavUrl] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+
+  // Browser Navigation Guard for Unsaved Changes (beforeunload)
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  // Next.js Client-Side Navigation Interceptor for Unsaved Changes (Shadcn AlertDialog)
+  useEffect(() => {
+    const handleAnchorClick = (e: MouseEvent) => {
+      if (!isDirty) return;
+
+      const target = e.target as HTMLElement;
+      const anchor = target.closest("a");
+
+      if (anchor && anchor.href && anchor.href !== window.location.href) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        setPendingNavUrl(anchor.href);
+        setShowUnsavedDialog(true);
+      }
+    };
+
+    document.addEventListener("click", handleAnchorClick, { capture: true });
+    return () => {
+      document.removeEventListener("click", handleAnchorClick, { capture: true });
+    };
+  }, [isDirty]);
   const [type, setType] = useState<"lesson" | "practice" | "exam">("lesson");
   const [isVisible, setIsVisible] = useState(true);
   const [requireSubmission, setRequireSubmission] = useState(false);
@@ -448,9 +503,78 @@ export default function ActivityEditorPage({
 
   // Section A & B: Global Context Summary, Reference Images & Dynamic Stations
   const [globalLatexSummary, setGlobalLatexSummary] = useState("");
+  const [contextViewMode, setContextViewMode] = useState<"edit" | "preview">("edit");
   const [referenceImageUrls, setReferenceImageUrls] = useState<string[]>([]);
   const [globalCustomIsolations, setGlobalCustomIsolations] = useState<CustomIsolationRule[]>([]);
   const [stations, setStations] = useState<ActivityStation[]>([]);
+
+  // Co-Pilot Chat UI States & Refinement Handler
+  const [refinementChat, setRefinementChat] = useState<{ role: "user" | "ai"; text: string }[]>([]);
+  const [isRefining, setIsRefining] = useState(false);
+  const [refinementInput, setRefinementInput] = useState("");
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [refinementChat, isRefining]);
+
+  const handleSendRefinementChat = async (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    const promptText = refinementInput.trim();
+    if (!promptText || isRefining) return;
+
+    setRefinementChat((prev) => [...prev, { role: "user", text: promptText }]);
+    setRefinementInput("");
+    setIsRefining(true);
+
+    try {
+      const result = await refineContextAction(globalLatexSummary, promptText);
+
+      if (result.success && result.markdown) {
+        setGlobalLatexSummary(result.markdown);
+        setIsDirty(true);
+        setRefinementChat((prev) => [
+          ...prev,
+          {
+            role: "ai",
+            text: "تم تحديث السياق وإصلاح الأخطاء! هل هناك تعديل آخر؟ ✨",
+          },
+        ]);
+      } else {
+        throw new Error(result.error || "فشل تنقيح السياق بواسطة الذكاء الاصطناعي");
+      }
+    } catch (err: any) {
+      console.error("Error in refinement chat:", err);
+      const errorMessage = err?.message || "";
+      const is503 =
+        errorMessage.includes("503") ||
+        errorMessage.includes("high demand") ||
+        errorMessage.includes("Service Unavailable") ||
+        errorMessage.includes("overloaded");
+
+      toast({
+        title: is503 ? "الخوادم مزدحمة حالياً 🚦" : "خطأ في تنقيح السياق",
+        description: is503
+          ? "يوجد ضغط عالٍ على خوادم الذكاء الاصطناعي في هذه اللحظة. يرجى المحاولة مرة أخرى بعد دقيقة."
+          : errorMessage || "تعذر تنفيذ التعديل المطلوب.",
+        variant: "destructive",
+      });
+
+      setRefinementChat((prev) => [
+        ...prev,
+        {
+          role: "ai",
+          text: is503
+            ? "🚦 عذراً، الخوادم مزدحمة حالياً بسبب ضغط الاستخدام. يرجى إعادة إرسال طلب التعديل بعد دقيقة."
+            : `⚠️ عذراً، تعذر تنفيذ التعديل: ${errorMessage || "حدث خطأ غير متوقع."}`,
+        },
+      ]);
+    } finally {
+      setIsRefining(false);
+    }
+  };
 
   // Available Students Pool State for Multi-Select
   const [allStudentsList, setAllStudentsList] = useState<StudentOption[]>([]);
@@ -498,6 +622,7 @@ export default function ActivityEditorPage({
       const resultText = data.cleanText || data.cleanedText;
       if (resultText) {
         setGlobalLatexSummary(resultText.trim());
+        setIsDirty(true);
         setRawLatexInput("");
         setIsCleanLatexModalOpen(false);
       }
@@ -904,15 +1029,17 @@ export default function ActivityEditorPage({
     } else {
       setAttachments((prev) => [...prev, newItem]);
     }
+    setIsDirty(true);
 
     handleCloseAttModal();
   };
 
   const handleRemoveAttachmentItem = (index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
+    setIsDirty(true);
   };
 
-  // AI Co-Pilot Context Engine State & Progressive Disclosure (Requirement 2, 3, 4)
+  // AI Co-Pilot Context Engine State & Progressive Disclosure
   const [showAdvancedAIMode, setShowAdvancedAIMode] = useState(false);
   const [isGeneratingAIContext, setIsGeneratingAIContext] = useState(false);
 
@@ -929,45 +1056,47 @@ export default function ActivityEditorPage({
     setIsGeneratingAIContext(true);
 
     try {
-      // Simulate AI Agent reading title, description, attachments, and stations
-      await new Promise((resolve) => setTimeout(resolve, 1400));
+      // Safely extract attached PDF URLs from attachments array
+      const pdfUrls = (attachments || [])
+        .map((a: any) => (typeof a === "string" ? a : a?.url))
+        .filter((u): u is string => Boolean(u && typeof u === "string" && u.toLowerCase().includes(".pdf")));
 
-      const generatedSummary = `### 📚 السياق والقوانين الرياضية المعتمدة للنشاط: "${title.trim()}"
+      const result = await generateContextAction(title.trim(), description.trim(), pdfUrls);
 
-**الهدف المنهجي والتربوي:**
-${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة وتطبيق مفاهيم الدرس وتحليل النتائج الرياضية بدقة منهجية."}
+      if (result.success && result.markdown) {
+        setGlobalLatexSummary(result.markdown);
+        setShowAdvancedAIMode(true); // Seamless auto-expand accordion
+        setIsDirty(true);
 
-**1. القوانين والمعادلات الرئيسية (LaTeX Rules):**
-- مبرهنة القيم المتوسطة: إذا كانت $f$ مستمرة على $[a, b]$ فإن $f(x) = k$ تقبل حلاً على الأقل.
-- حساب المستقر والربط بين المحطات والتغيرات: $f'(x) = 0$.
-
-**2. توجيهات المساعد الذكي (AI Persona):**
-- مراعاة التدرج في تقديم المؤشرات وإجابة استفسارات التلميذ دون إعطاء الحل المباشر.`;
-
-      setGlobalLatexSummary(generatedSummary);
-
-      // If interactive mode, populate empty stations as well
-      if (activityMode === "interactive" && stations.length > 0) {
-        setStations((prev) =>
-          prev.map((st, idx) => ({
-            ...st,
-            aiDirectives: st.aiDirectives && st.aiDirectives.trim()
-              ? st.aiDirectives
-              : `### 🎯 قوانين المحطة ${idx + 1}: ${st.title || "تمرّن واستخلاص"}\n- المعادلة التوجيهية: $f'(x) = 0$\n- الإرشادات: مساعدة التلميذ على استنتاج جدول التغيرات.`,
-          }))
-        );
+        toast({
+          title: "تم التوليد بنجاح ✨",
+          description: "قام الذكاء الاصطناعي بتبسيط الشرح واستخراج الرموز والقوانين الرياضية تلقائياً.",
+        });
+      } else {
+        throw new Error(result.error || "فشل في استخراج سياق النشاط من الذكاء الاصطناعي");
       }
-
-      toast({
-        title: "تم توليد السياق الذكي بنجاح ✨",
-        description: "قام الذكاء الاصطناعي بتبسيط الشرح واستخراج الرموز والقوانين الرياضية لدروسك وتصميم التوجيهات تلقائياً.",
-      });
     } catch (err: any) {
-      toast({
-        title: "حدث خطأ أثناء التوليد",
-        description: err?.message || "تعذر استخراج السياق الذكي تلقائياً. يرجى المحاولة مرة أخرى.",
-        variant: "destructive",
-      });
+      console.error("Error generating AI activity context:", err);
+      const errorMessage = err?.message || "";
+
+      if (
+        errorMessage.includes("503") ||
+        errorMessage.includes("high demand") ||
+        errorMessage.includes("Service Unavailable") ||
+        errorMessage.includes("overloaded")
+      ) {
+        toast({
+          title: "الخوادم مزدحمة حالياً 🚦",
+          description: "يوجد ضغط عالٍ على خوادم الذكاء الاصطناعي في هذه اللحظة. يرجى المحاولة مرة أخرى بعد دقيقة.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "خطأ",
+          description: errorMessage || "فشل في استخراج سياق النشاط",
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsGeneratingAIContext(false);
     }
@@ -1077,12 +1206,14 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
     setGroupIds((prev) =>
       prev.includes(gId) ? prev.filter((id) => id !== gId) : [...prev, gId]
     );
+    setIsDirty(true);
   };
 
   const handleSelectAllGroups = () => {
     setGroupNotice(false);
     const allActiveIds = availableGroups.map((g) => g.id!).filter(Boolean);
     setGroupIds(allActiveIds);
+    setIsDirty(true);
   };
 
   // Open Exceptions Modal Trigger
@@ -1100,10 +1231,12 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
     if (!newVideoUrl.trim()) return;
     setVideos((prev) => [...prev, newVideoUrl.trim()]);
     setNewVideoUrl("");
+    setIsDirty(true);
   };
 
   const handleRemoveVideo = (index: number) => {
     setVideos((prev) => prev.filter((_, i) => i !== index));
+    setIsDirty(true);
   };
 
   // Save Activity Handler
@@ -1158,7 +1291,7 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
       console.log("Saving payload:", payload);
 
       await updateActivity(activityId, payload);
-
+      setIsDirty(false);
       setSaveSuccess(true);
       toast({
         title: "تم حفظ التغييرات بنجاح",
@@ -1282,8 +1415,19 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
             type="button"
             onClick={() => handleSaveActivity()}
             disabled={isSaving}
-            className="px-5 h-10 rounded-xl bg-primary text-on-primary font-bold text-xs hover:bg-primary/90 focus:outline-none focus:ring-4 focus:ring-primary/30 shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            className={`relative px-5 h-10 rounded-xl font-extrabold text-xs transition-all duration-200 flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+              isDirty
+                ? "bg-primary text-on-primary hover:bg-primary/90 focus:ring-4 focus:ring-primary/30 ring-2 ring-primary/40 scale-[1.02]"
+                : "bg-surface-variant/60 text-on-surface-variant hover:bg-surface-variant"
+            }`}
           >
+            {isDirty && !isSaving && (
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+              </span>
+            )}
+
             {isSaving ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -1291,7 +1435,7 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
               </>
             ) : saveSuccess ? (
               <>
-                <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 <span>تم الحفظ!</span>
               </>
             ) : (
@@ -1378,7 +1522,7 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       <button
                         type="button"
-                        onClick={() => setActivityMode("theoretical")}
+                        onClick={() => { setActivityMode("theoretical"); setIsDirty(true); }}
                         className={`py-3.5 px-4 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2.5 cursor-pointer border shadow-2xs ${
                           activityMode === "theoretical"
                             ? "bg-primary text-on-primary border-primary shadow-xs scale-[1.01]"
@@ -1391,7 +1535,7 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
 
                       <button
                         type="button"
-                        onClick={() => setActivityMode("interactive")}
+                        onClick={() => { setActivityMode("interactive"); setIsDirty(true); }}
                         className={`py-3.5 px-4 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2.5 cursor-pointer border shadow-2xs ${
                           activityMode === "interactive"
                             ? "bg-primary text-on-primary border-primary shadow-xs scale-[1.01]"
@@ -1425,7 +1569,7 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                         <input
                           type="text"
                           value={title}
-                          onChange={(e) => setTitle(e.target.value)}
+                          onChange={(e) => { setTitle(e.target.value); setIsDirty(true); }}
                           placeholder="عنوان الدرس أو التمرين..."
                           required
                           className="w-full h-12 px-4 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all font-medium"
@@ -1439,7 +1583,10 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                         </label>
                         <RichTextEditor
                           value={description}
-                          onChange={(val) => setDescription(val)}
+                          onChange={(val) => {
+                            setDescription(val);
+                            setIsDirty(true);
+                          }}
                           placeholder="أدخل نص الدرس الشارح مع القوانين والمعادلات الرياضية..."
                         />
 
@@ -1963,7 +2110,7 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                         {isGeneratingAIContext ? (
                           <>
                             <Loader2 className="w-5 h-5 animate-spin text-white" />
-                            <span>جارِ قراءة المرفقات واستخراج القوانين...</span>
+                            <span>جاري تحليل المرفقات وبناء السياق (قد يستغرق الأمر دقيقة أو أكثر)...</span>
                           </>
                         ) : (
                           <>
@@ -1973,21 +2120,6 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                         )}
                       </button>
                     </div>
-
-                    {/* Status Indicator Card if Context already exists */}
-                    {globalLatexSummary.trim() && (
-                      <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 space-y-2 animate-fadeIn">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-black text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4 shrink-0" />
-                            <span>تم بناء السياق والقوانين الرياضية الذكية لهذا النشاط بنجاح ✨</span>
-                          </span>
-                        </div>
-                        <div className="text-xs text-on-surface leading-relaxed bg-surface p-3.5 rounded-xl border border-outline/10 max-h-36 overflow-y-auto">
-                          <MathText content={globalLatexSummary} />
-                        </div>
-                      </div>
-                    )}
                   </div>
 
                   {/* REQUIREMENT 3: Progressive Disclosure Accordion (Advanced Manual Mode) */}
@@ -2020,11 +2152,39 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                     {/* Hidden by default - Revealed only in Advanced Mode */}
                     {showAdvancedAIMode && (
                       <div className="p-6 space-y-6 animate-fadeIn border-t border-outline/10">
-                        <div className="space-y-2">
+                        <div className="space-y-3">
                           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 gap-3">
-                            <span className="block text-xs font-bold text-on-surface">
-                              ملخص القواعد المعتمدة للنشاط (سياق دائم للذكاء الاصطناعي - Global Context)
-                            </span>
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className="block text-xs font-bold text-on-surface">
+                                ملخص القواعد المعتمدة للنشاط (سياق دائم للذكاء الاصطناعي - Global Context)
+                              </span>
+                              {/* Edit / Preview Tab Switcher */}
+                              <div className="inline-flex p-1 rounded-xl bg-surface-variant/40 border border-outline/20">
+                                <button
+                                  type="button"
+                                  onClick={() => setContextViewMode("edit")}
+                                  className={`px-3 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                                    contextViewMode === "edit"
+                                      ? "bg-surface text-primary shadow-xs"
+                                      : "text-on-surface-variant/70 hover:text-on-surface"
+                                  }`}
+                                >
+                                  ✏️ وضع التعديل (Edit)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setContextViewMode("preview")}
+                                  className={`px-3 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                                    contextViewMode === "preview"
+                                      ? "bg-surface text-primary shadow-xs"
+                                      : "text-on-surface-variant/70 hover:text-on-surface"
+                                  }`}
+                                >
+                                  👁️ معاينة السياق (Preview)
+                                </button>
+                              </div>
+                            </div>
+
                             <button
                               type="button"
                               onClick={() => setIsCleanLatexModalOpen(true)}
@@ -2034,16 +2194,130 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                               <span>استخراج المرجع الرياضي من كود LaTeX</span>
                             </button>
                           </div>
-                          <textarea
-                            value={globalLatexSummary}
-                            onChange={(e) => setGlobalLatexSummary(e.target.value)}
-                            rows={4}
-                            placeholder="اكتب ملخص القوانين والقواعد والإرشادات المعتمدة لهذا النشاط (مثال: ملخص مبرهنة القيم المتوسطة، الشروط، والقوانين المعتمدة)..."
-                            className="w-full p-4 rounded-2xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs sm:text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all font-medium resize-y"
-                          />
+
+                          {contextViewMode === "edit" ? (
+                            <textarea
+                              value={globalLatexSummary}
+                              onChange={(e) => {
+                                setGlobalLatexSummary(e.target.value);
+                                setIsDirty(true);
+                              }}
+                              rows={5}
+                              placeholder="اكتب ملخص القوانين والقواعد والإرشادات المعتمدة لهذا النشاط (مثال: ملخص مبرهنة القيم المتوسطة، الشروط، والقوانين المعتمدة)..."
+                              className="w-full p-4 rounded-2xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs sm:text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all font-medium resize-y"
+                            />
+                          ) : (
+                            <div className="p-4.5 rounded-2xl bg-muted/50 border border-outline/20 text-on-surface min-h-[160px] max-h-80 overflow-y-auto shadow-inner space-y-2" dir="rtl">
+                              {globalLatexSummary.trim() ? (
+                                <div className="prose dark:prose-invert max-w-none text-right text-xs sm:text-sm leading-relaxed">
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkMath]}
+                                    rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+                                  >
+                                    {globalLatexSummary}
+                                  </ReactMarkdown>
+                                </div>
+                              ) : (
+                                <div className="text-center py-8 text-on-surface-variant/60 font-medium text-xs">
+                                  لا يوجد سياق مكتوب للمعاينة بعد. قم بالتحويل إلى "وضع التعديل" أو اضغط "توليد السياق الذكي تلقائياً".
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           <p className="text-[11px] text-on-surface-variant/70 leading-relaxed">
                             يوفر هذا الحقل الإطار المنهجي والقوانين العامة التي تؤطر المساعد الذكي (AI Agent) أثناء مرافقة التلميذ عبر كافة محطات هذا النشاط.
                           </p>
+
+                          {/* Co-Pilot Chat UI for Context Refinement */}
+                          <div className="space-y-2 pt-3 border-t border-outline/10">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-on-surface flex items-center gap-2">
+                                <Bot className="w-4 h-4 text-indigo-500" />
+                                <span>💬 الدردشة مع المساعد لتنقيح السياق (Chat with Assistant to Refine Context)</span>
+                              </span>
+                              <span className="text-[11px] font-bold text-on-surface-variant/70">
+                                تحديث مباشر للسياق أعلاه
+                              </span>
+                            </div>
+
+                            <div className="flex flex-col border border-outline/20 rounded-2xl bg-surface-variant/20 overflow-hidden shadow-xs">
+                              {/* Scrollable Chat History Window */}
+                              <div
+                                ref={chatScrollRef}
+                                className="overflow-y-auto flex-1 p-4 space-y-3 min-h-[180px] max-h-[260px] cursor-default text-xs"
+                                dir="rtl"
+                              >
+                                {refinementChat.length === 0 ? (
+                                  <div className="text-center py-6 text-on-surface-variant/60 space-y-1">
+                                    <p className="font-extrabold text-xs">💬 مساعدك الذكي جاهز لتعديل وتنقيح سياق النشاط أعلاه.</p>
+                                    <p className="text-[11px]">
+                                      اطلب أي تعديل، إضافة، أو تبسيط (مثال: "بسط عبارة مبرهنة القيم المتوسطة"، "أضف قانون مشتق الدالة الأُسية"...).
+                                    </p>
+                                  </div>
+                                ) : (
+                                  refinementChat.map((msg, index) => (
+                                    <div key={index} className="flex flex-col space-y-1">
+                                      <div
+                                        className={`p-3 rounded-2xl text-xs font-medium max-w-[85%] leading-relaxed ${
+                                          msg.role === "user"
+                                            ? "bg-primary text-on-primary ml-auto rounded-tr-xs shadow-2xs"
+                                            : "bg-surface border border-outline/15 text-on-surface mr-auto rounded-tl-xs shadow-2xs"
+                                        }`}
+                                      >
+                                        {msg.text}
+                                      </div>
+                                      <span
+                                        className={`text-[10px] font-semibold text-on-surface-variant/50 px-1 ${
+                                          msg.role === "user" ? "text-right" : "text-left"
+                                        }`}
+                                      >
+                                        {msg.role === "user" ? "أنت" : "المساعد الذكي ✨"}
+                                      </span>
+                                    </div>
+                                  ))
+                                )}
+
+                                {isRefining && (
+                                  <div className="flex items-center gap-2 p-3 rounded-2xl bg-surface border border-outline/15 text-xs font-bold text-primary mr-auto max-w-[85%] shadow-2xs animate-pulse">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <span>جاري تحليل توجيهاتك وتنفيذ التعديلات على السياق أعلاه...</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Chat Input Bar (Non-Form DIV to prevent nested form HTML hydration errors) */}
+                              <div className="p-2.5 bg-surface border-t border-outline/15 flex items-center gap-2" dir="rtl">
+                                <input
+                                  type="text"
+                                  value={refinementInput}
+                                  onChange={(e) => setRefinementInput(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      handleSendRefinementChat();
+                                    }
+                                  }}
+                                  disabled={isRefining || !globalLatexSummary.trim()}
+                                  placeholder="اطلب أي تعديل، إضافة، أو حذف من السياق أعلاه..."
+                                  className="flex-1 h-10 px-4 rounded-xl bg-surface-variant/40 border border-outline/20 text-on-surface text-xs font-medium focus:outline-none focus:border-primary transition-all disabled:opacity-50"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSendRefinementChat()}
+                                  disabled={isRefining || !refinementInput.trim() || !globalLatexSummary.trim()}
+                                  className="h-10 px-4 rounded-xl bg-primary text-on-primary font-extrabold text-xs hover:bg-primary/90 transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                                >
+                                  {isRefining ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Send className="w-3.5 h-3.5" />
+                                  )}
+                                  <span>تعديل</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         </div>
 
                         {/* Media Inclusion Selector (Requirement 2 - Replaces Redundant Dropzone) */}
@@ -2082,6 +2356,7 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                                 const isIncluded = referenceImageUrls.includes(attUrl);
 
                                 const toggleInclusion = (checked: boolean) => {
+                                  setIsDirty(true);
                                   if (checked) {
                                     setReferenceImageUrls((prev) => Array.from(new Set([...prev, attUrl])));
                                   } else {
@@ -2329,7 +2604,10 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                           <input
                             type="checkbox"
                             checked={hasQuiz}
-                            onChange={(e) => setHasQuiz(e.target.checked)}
+                            onChange={(e) => {
+                              setHasQuiz(e.target.checked);
+                              setIsDirty(true);
+                            }}
                             className="w-4 h-4 rounded border-outline/30 text-primary focus:ring-primary cursor-pointer"
                           />
                           <span>تفعيل اختبار تفاعلي (Quiz)</span>
@@ -2339,7 +2617,10 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
                           <input
                             type="checkbox"
                             checked={requireSubmission}
-                            onChange={(e) => setRequireSubmission(e.target.checked)}
+                            onChange={(e) => {
+                              setRequireSubmission(e.target.checked);
+                              setIsDirty(true);
+                            }}
                             className="w-4 h-4 rounded border-outline/30 text-primary focus:ring-primary cursor-pointer"
                           />
                           <span>يتطلب تسليم إجابة</span>
@@ -2349,7 +2630,13 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
 
                     {hasQuiz && (
                       <div className="pt-2">
-                        <QuizBuilder questions={quiz} onChange={setQuiz} />
+                        <QuizBuilder
+                          questions={quiz}
+                          onChange={(newQuiz) => {
+                            setQuiz(newQuiz);
+                            setIsDirty(true);
+                          }}
+                        />
                       </div>
                     )}
                   </div>
@@ -2673,6 +2960,38 @@ ${description.trim() ? description.trim().slice(0, 180) + "..." : "دراسة و
         groups={availableGroups}
         onConfirm={handleConfirmTargetSelection}
       />
+
+      {/* Unsaved Changes Navigation Guard Dialog (Shadcn AlertDialog) */}
+      <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-amber-500 font-extrabold">تغييرات غير محفوظة</AlertDialogTitle>
+            <AlertDialogDescription>
+              لديك تغييرات لم تقم بحفظها. إذا غادرت هذه الصفحة الآن، ستفقد كل ما قمت بتعديله.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setShowUnsavedDialog(false);
+                setPendingNavUrl(null);
+              }}
+            >
+              البقاء في الصفحة
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold"
+              onClick={() => {
+                if (pendingNavUrl) {
+                  window.location.href = pendingNavUrl;
+                }
+              }}
+            >
+              تجاهل والمغادرة
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

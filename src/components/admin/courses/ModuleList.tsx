@@ -13,6 +13,18 @@ import {
 import { GroupDoc } from "@/src/lib/firebase/groupsService";
 import { MD3Switch } from "./MD3Switch";
 import { StudentExceptionsModal } from "@/src/components/admin/activities/StudentExceptionsModal";
+import { InlineAIRefiner } from "@/src/components/admin/activities/InlineAIRefiner";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/src/components/ui/alert-dialog";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -327,15 +339,10 @@ export function ModuleList({
                   <Edit className="w-4 h-4" />
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => module.id && onDeleteModule(module.id)}
-                  className="p-2 rounded-xl text-on-surface-variant/60 hover:text-error hover:bg-error-container/30 transition-colors"
-                  aria-label="حذف الفصل"
-                  title="حذف الفصل"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <ModuleDeleteDialog
+                  moduleTitle={module.title}
+                  onConfirmDelete={() => module.id && onDeleteModule(module.id)}
+                />
               </div>
             </div>
 
@@ -437,19 +444,10 @@ export function ModuleList({
                               <Edit className="w-4 h-4" />
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                if (act.id) onDeleteActivity(act.id);
-                              }}
-                              className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-error hover:bg-error-container/30 transition-colors"
-                              aria-label="حذف النشاط"
-                              title="حذف النشاط"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <ActivityDeleteDialog
+                              activityTitle={act.title}
+                              onConfirmDelete={() => act.id && onDeleteActivity(act.id)}
+                            />
                           </div>
                         </div>
                       );
@@ -606,6 +604,10 @@ export function ModuleList({
                     placeholder="اكتب رؤوس أقلام الفهرس وسياق هذه الوحدة..."
                     disabled={isUpdatingModule}
                     className="w-full p-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs sm:text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all resize-none font-medium"
+                  />
+                  <InlineAIRefiner
+                    currentText={editModuleIndexContext}
+                    onRefined={(newText) => setEditModuleIndexContext(newText)}
                   />
                   <p className="text-[11px] text-on-surface-variant/70">
                     اكتب رؤوس أقلام فقط عن محتوى هذه الوحدة. هذا النص سيرافق التلميذ دائماً أثناء دراسته لدروس هذه الوحدة.
@@ -852,6 +854,123 @@ export function ModuleList({
         </div>
       )}
     </div>
+  );
+}
+
+function ModuleDeleteDialog({
+  moduleTitle,
+  onConfirmDelete,
+}: {
+  moduleTitle: string;
+  onConfirmDelete: () => void;
+}) {
+  const [confirmInput, setConfirmInput] = useState("");
+
+  return (
+    <AlertDialog onOpenChange={(open) => { if (!open) setConfirmInput(""); }}>
+      <AlertDialogTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          className="p-2 rounded-xl text-on-surface-variant/60 hover:text-error hover:bg-error-container/30 transition-colors cursor-pointer"
+          aria-label="حذف الفصل"
+          title="حذف الفصل"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>حذف الفصل نهائياً (منطقة الخطر ⚠️)</AlertDialogTitle>
+          <AlertDialogDescription>
+            هذا الإجراء لا يمكن التراجع عنه. سيتم حذف الفصل <strong>«{moduleTitle}»</strong> وكافة أنشطته ومرفقاته نهائياً. يرجى كتابة <strong className="text-error font-black">حذف نهائي</strong> لتأكيد العملية.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="py-2 space-y-1.5" onClick={(e) => e.stopPropagation()}>
+          <label className="block text-[11px] font-bold text-on-surface-variant">
+            أدخل كلمة التأكيد:
+          </label>
+          <input
+            type="text"
+            value={confirmInput}
+            onChange={(e) => setConfirmInput(e.target.value)}
+            placeholder="حذف نهائي"
+            className="w-full h-10 px-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface font-extrabold text-xs focus:outline-none focus:border-error focus:ring-2 focus:ring-error/20 transition-all dir-rtl text-right"
+          />
+        </div>
+
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setConfirmInput("")}>إلغاء</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={confirmInput.trim() !== "حذف نهائي"}
+            onClick={onConfirmDelete}
+          >
+            حذف الفصل
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function ActivityDeleteDialog({
+  activityTitle,
+  onConfirmDelete,
+}: {
+  activityTitle: string;
+  onConfirmDelete: () => void;
+}) {
+  const [confirmInput, setConfirmInput] = useState("");
+
+  return (
+    <AlertDialog onOpenChange={(open) => { if (!open) setConfirmInput(""); }}>
+      <AlertDialogTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-error hover:bg-error-container/30 transition-colors cursor-pointer"
+          aria-label="حذف النشاط"
+          title="حذف النشاط"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>حذف النشاط نهائياً (منطقة الخطر ⚠️)</AlertDialogTitle>
+          <AlertDialogDescription>
+            هذا الإجراء لا يمكن التراجع عنه. سيتم حذف النشاط <strong>«{activityTitle}»</strong> ومحطاته ومرفقاته وتسليمات التلاميذ نهائياً. يرجى كتابة <strong className="text-error font-black">حذف نهائي</strong> لتأكيد العملية.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="py-2 space-y-1.5" onClick={(e) => e.stopPropagation()}>
+          <label className="block text-[11px] font-bold text-on-surface-variant">
+            أدخل كلمة التأكيد:
+          </label>
+          <input
+            type="text"
+            value={confirmInput}
+            onChange={(e) => setConfirmInput(e.target.value)}
+            placeholder="حذف نهائي"
+            className="w-full h-10 px-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface font-extrabold text-xs focus:outline-none focus:border-error focus:ring-2 focus:ring-error/20 transition-all dir-rtl text-right"
+          />
+        </div>
+
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setConfirmInput("")}>إلغاء</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={confirmInput.trim() !== "حذف نهائي"}
+            onClick={onConfirmDelete}
+          >
+            حذف النشاط
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

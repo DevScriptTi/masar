@@ -30,6 +30,18 @@ import {
   Bot,
 } from "lucide-react";
 import { useToast } from "@/src/components/ui/use-toast";
+import { InlineAIRefiner } from "@/src/components/admin/activities/InlineAIRefiner";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/src/components/ui/alert-dialog";
 
 export default function CoursesPage() {
   const router = useRouter();
@@ -160,16 +172,19 @@ export default function CoursesPage() {
     }
   };
 
-  const handleDeleteCourse = async (e: React.MouseEvent, courseId: string) => {
-    e.stopPropagation();
-    if (!confirm("هل أنت تأكد من رغبتك في حذف هذه الدورة وكافة فصولها؟")) return;
-
+  const handleDeleteCourseDirect = async (courseId: string) => {
     try {
       await deleteCourse(courseId);
       setCourses((prev) => prev.filter((c) => c.id !== courseId));
+      toast({
+        title: "تم حذف الدورة بنجاح 🗑️",
+      });
     } catch (error) {
       console.error("Error deleting course:", error);
-      alert("حدث خطأ أثناء حذف الدورة.");
+      toast({
+        title: "حدث خطأ أثناء حذف الدورة",
+        variant: "destructive",
+      });
     }
   };
 
@@ -270,15 +285,10 @@ export default function CoursesPage() {
                         <Edit className="w-4 h-4" />
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={(e) => course.id && handleDeleteCourse(e, course.id)}
-                        className="p-2 rounded-xl text-on-surface-variant/60 hover:text-error hover:bg-error-container/30 transition-colors"
-                        title="حذف الدورة"
-                        aria-label="حذف الدورة"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <CourseDeleteDialog
+                        courseTitle={course.title}
+                        onConfirmDelete={() => course.id && handleDeleteCourseDirect(course.id)}
+                      />
                     </div>
                   </div>
 
@@ -448,6 +458,10 @@ export default function CoursesPage() {
                     disabled={isSubmitting}
                     className="w-full p-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs sm:text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all resize-none"
                   />
+                  <InlineAIRefiner
+                    currentText={courseIndexContext}
+                    onRefined={(newText) => setCourseIndexContext(newText)}
+                  />
                   <p className="text-[11px] text-on-surface-variant/70">
                     اكتب رؤوس أقلام فقط. هذا النص سيرافق التلميذ دائماً في هذا المسار.
                   </p>
@@ -529,5 +543,62 @@ export default function CoursesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function CourseDeleteDialog({
+  courseTitle,
+  onConfirmDelete,
+}: {
+  courseTitle: string;
+  onConfirmDelete: () => void;
+}) {
+  const [confirmInput, setConfirmInput] = useState("");
+
+  return (
+    <AlertDialog onOpenChange={(open) => { if (!open) setConfirmInput(""); }}>
+      <AlertDialogTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          className="p-2 rounded-xl text-on-surface-variant/60 hover:text-error hover:bg-error-container/30 transition-colors cursor-pointer"
+          title="حذف الدورة"
+          aria-label="حذف الدورة"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>حذف الدورة نهائياً (منطقة الخطر ⚠️)</AlertDialogTitle>
+          <AlertDialogDescription>
+            هذا الإجراء لا يمكن التراجع عنه. سيتم حذف الدورة <strong>«{courseTitle}»</strong> وكل الفصول والأنشطة والمرفقات المرتبطة بها نهائياً. يرجى كتابة <strong className="text-error font-black">حذف نهائي</strong> لتأكيد العملية.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="py-2 space-y-1.5" onClick={(e) => e.stopPropagation()}>
+          <label className="block text-[11px] font-bold text-on-surface-variant">
+            أدخل كلمة التأكيد:
+          </label>
+          <input
+            type="text"
+            value={confirmInput}
+            onChange={(e) => setConfirmInput(e.target.value)}
+            placeholder="حذف نهائي"
+            className="w-full h-10 px-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface font-extrabold text-xs focus:outline-none focus:border-error focus:ring-2 focus:ring-error/20 transition-all dir-rtl text-right"
+          />
+        </div>
+
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setConfirmInput("")}>إلغاء</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={confirmInput.trim() !== "حذف نهائي"}
+            onClick={onConfirmDelete}
+          >
+            حذف الدورة
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Check,
   Info,
+  Filter,
 } from "lucide-react";
 
 export interface TargetSelectionModalProps {
@@ -39,6 +40,7 @@ export function TargetSelectionModal({
 }: TargetSelectionModalProps) {
   const [activeTab, setActiveTab] = useState<"cohorts" | "students">("cohorts");
   const [searchQuery, setSearchQuery] = useState("");
+  const [studentCohortFilter, setStudentCohortFilter] = useState<string>("all");
   const [tempStudentIds, setTempStudentIds] = useState<string[]>([]);
   const [tempGroupIds, setTempGroupIds] = useState<string[]>([]);
 
@@ -59,6 +61,7 @@ export function TargetSelectionModal({
         setTempGroupIds(selectedGroupIds || []);
       }
       setSearchQuery("");
+      setStudentCohortFilter("all");
     }
   }, [isOpen, selectedStudentIds, selectedGroupIds, selectedTargets]);
 
@@ -85,17 +88,34 @@ export function TargetSelectionModal({
     return groups.filter((g) => g.name.toLowerCase().includes(q));
   }, [groups, searchQuery]);
 
-  // Filtered Students (100% Independent - NEVER cross-filtered by selected cohorts)
+  // Filtered Students (Strictly visual cohort filter local to Students tab)
   const filteredStudents = useMemo(() => {
-    if (!searchQuery.trim()) return allStudents;
-    const q = searchQuery.toLowerCase().trim();
-    return allStudents.filter(
-      (s) =>
-        s.fullName.toLowerCase().includes(q) ||
-        (s.groupName && s.groupName.toLowerCase().includes(q)) ||
-        (s.email && s.email.toLowerCase().includes(q))
-    );
-  }, [allStudents, searchQuery]);
+    let result = allStudents;
+
+    // Apply local visual cohort filter
+    if (studentCohortFilter !== "all") {
+      const selectedGroup = groups.find((g) => g.id === studentCohortFilter);
+      result = result.filter(
+        (s) =>
+          s.groupId === studentCohortFilter ||
+          (Boolean(s.allGroupKeys && studentCohortFilter) && s.allGroupKeys!.includes(studentCohortFilter)) ||
+          (selectedGroup && s.groupName === selectedGroup.name)
+      );
+    }
+
+    // Apply search query filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(
+        (s) =>
+          s.fullName.toLowerCase().includes(q) ||
+          (s.groupName && s.groupName.toLowerCase().includes(q)) ||
+          (s.email && s.email.toLowerCase().includes(q))
+      );
+    }
+
+    return result;
+  }, [allStudents, searchQuery, studentCohortFilter, groups]);
 
   const toggleGroup = (groupId: string) => {
     setTempGroupIds((prev) =>
@@ -154,7 +174,7 @@ export function TargetSelectionModal({
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn"
       dir="rtl"
     >
-      <div className="bg-surface border border-outline/20 rounded-3xl p-6 sm:p-7 max-w-2xl w-full shadow-2xl space-y-5 relative max-h-[90vh] flex flex-col animate-scaleUp">
+      <div className="bg-surface border border-outline/20 rounded-3xl p-6 sm:p-7 max-w-2xl w-full shadow-2xl space-y-4 relative max-h-[90vh] flex flex-col animate-scaleUp">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-outline/15 pb-4 shrink-0">
           <div className="flex items-center gap-3">
@@ -179,7 +199,7 @@ export function TargetSelectionModal({
         </div>
 
         {/* Sticky Search Bar & Filter Controls */}
-        <div className="space-y-3 shrink-0">
+        <div className="space-y-2.5 shrink-0">
           <div className="relative">
             <Search className="w-4 h-4 text-on-surface-variant absolute right-3.5 top-3" />
             <input
@@ -250,10 +270,45 @@ export function TargetSelectionModal({
               تحديد/إلغاء الكل
             </button>
           </div>
+
+          {/* Local Visual Cohort Filter Dropdown (Active only in Students Tab) */}
+          {activeTab === "students" && (
+            <div className="flex items-center gap-2 pt-1 animate-fadeIn bg-purple-500/5 p-2 rounded-2xl border border-purple-500/15">
+              <Filter className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+              <span className="text-[11px] font-extrabold text-purple-900 dark:text-purple-200 shrink-0">
+                تصفية القائمة حسب الفوج:
+              </span>
+              <select
+                value={studentCohortFilter}
+                onChange={(e) => setStudentCohortFilter(e.target.value)}
+                className="h-8 px-3 rounded-xl bg-surface border border-outline/30 text-on-surface font-extrabold text-xs focus:outline-none focus:border-purple-500 transition-all flex-1 cursor-pointer"
+              >
+                <option value="all">جميع الأفواج (عرض كافة التلاميذ)</option>
+                {groups.map((group) => {
+                  const count = group.id ? (cohortStudentCounts[group.id] ?? 0) : 0;
+                  return (
+                    <option key={group.id} value={group.id}>
+                      {group.name} ({count} تلميذ)
+                    </option>
+                  );
+                })}
+              </select>
+
+              {studentCohortFilter !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setStudentCohortFilter("all")}
+                  className="px-2.5 h-8 rounded-xl bg-purple-600 text-white font-bold text-[11px] hover:bg-purple-700 transition-all shrink-0 cursor-pointer shadow-2xs"
+                >
+                  إعادة تعيين التصفية
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Tab Content List Container */}
-        <div className="flex-1 overflow-y-auto min-h-[220px] max-h-[360px] pr-1 space-y-2">
+        <div className="flex-1 overflow-y-auto min-h-[220px] max-h-[340px] pr-1 space-y-2">
           {activeTab === "cohorts" ? (
             filteredGroups.length === 0 ? (
               <div className="p-8 text-center text-xs text-on-surface-variant/70 italic">
@@ -314,7 +369,9 @@ export function TargetSelectionModal({
             )
           ) : filteredStudents.length === 0 ? (
             <div className="p-8 text-center text-xs text-on-surface-variant/70 italic">
-              لا يوجد تلاميذ مطابقون للبحث.
+              {studentCohortFilter !== "all"
+                ? "لا يوجد تلاميذ في هذا الفوج المحدد مطبقون للتصفية."
+                : "لا يوجد تلاميذ مطابقون للبحث."}
             </div>
           ) : (
             <div className="space-y-1.5">

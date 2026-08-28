@@ -18,6 +18,7 @@ import {
 import { fetchGroups, GroupDoc } from "@/src/lib/firebase/groupsService";
 import { ModuleList } from "@/src/components/admin/courses/ModuleList";
 import { StudentExceptionsModal } from "@/src/components/admin/activities/StudentExceptionsModal";
+import { InlineAIRefiner } from "@/src/components/admin/activities/InlineAIRefiner";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -84,22 +85,34 @@ export default function CourseBuilderPage({
 
     setIsGeneratingModuleAI(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-
-      setModuleIndexContext(`فهرس وسياق الفصل: "${moduleTitle.trim()}"\n- القوانين الأساسية والشروط الهندسية والتحليلية المعتمدة لهذه الوحدة.`);
-
-      setModuleDetailedLatex(`% القوانين التفصيلية بـ LaTeX للفصل: ${moduleTitle.trim()}
-\\section*{القوانين الرئيسية}
-\\begin{itemize}
-  \\item مبرهنة القيم المتوسطة: $f(a) \\times f(b) < 0$
-  \\item حساب النهايات والتغيرات: \\lim_{x \\to 0} \\frac{\\sin x}{x} = 1
-\\end{itemize}`);
-
-      toast({
-        title: "تم توليد سياق الفصل بنجاح ✨",
-        description: "تم استخراج الرموز وقوانين LaTeX لهذا الفصل تلقائياً بواسطة المساعد الذكي.",
+      const res = await fetch("/api/ai/generate-context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: moduleTitle.trim(),
+        }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "فشل في توليد سياق الفصل من الذكاء الاصطناعي");
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        setModuleIndexContext(data.indexContext || "");
+        setModuleDetailedLatex(data.detailedLatex || "");
+        setShowModuleAdvancedAI(true); // Seamless auto-expand
+
+        toast({
+          title: "تم توليد سياق الفصل بنجاح ✨",
+          description: "تم استخراج الرموز وقوانين LaTeX لهذا الفصل تلقائياً وتم فتح التعديل اليدوي.",
+        });
+      } else {
+        throw new Error(data.error || "استجابة غير صالحة من نموذج الذكاء الاصطناعي");
+      }
     } catch (err: any) {
+      console.error("Error generating module AI context:", err);
       toast({
         title: "حدث خطأ أثناء التوليد",
         description: err?.message || "تعذر توليد سياق الفصل.",
@@ -296,25 +309,35 @@ export default function CourseBuilderPage({
 
   // Handle Deletions
   const handleDeleteModule = async (moduleId: string) => {
-    if (!confirm("هل أنت تأكد من رغبتك في حذف هذا الفصل وكافة أنشطته؟")) return;
     try {
       await deleteModule(moduleId);
       setModules((prev) => prev.filter((m) => m.id !== moduleId));
       setActivities((prev) => prev.filter((a) => a.moduleId !== moduleId));
+      toast({
+        title: "تم حذف الفصل وكافة أنشطته بنجاح 🗑️",
+      });
     } catch (error) {
       console.error("Error deleting module:", error);
-      alert("حدث خطأ أثناء حذف الفصل.");
+      toast({
+        title: "حدث خطأ أثناء حذف الفصل",
+        variant: "destructive",
+      });
     }
   };
 
   const handleDeleteActivity = async (activityId: string) => {
-    if (!confirm("هل أنت تأكد من رغبتك في حذف هذا النشاط؟")) return;
     try {
       await deleteActivity(activityId);
       setActivities((prev) => prev.filter((a) => a.id !== activityId));
+      toast({
+        title: "تم حذف النشاط بنجاح 🗑️",
+      });
     } catch (error) {
       console.error("Error deleting activity:", error);
-      alert("حدث خطأ أثناء حذف النشاط.");
+      toast({
+        title: "حدث خطأ أثناء حذف النشاط",
+        variant: "destructive",
+      });
     }
   };
 
@@ -568,14 +591,6 @@ export default function CourseBuilderPage({
                       )}
                     </button>
                   </div>
-
-                  {/* Status Indicator if generated */}
-                  {(moduleIndexContext.trim() || moduleDetailedLatex.trim()) && (
-                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" />
-                      <span>تم توليد الفهرس والقوانين لهذا الفصل بنجاح ✨</span>
-                    </div>
-                  )}
                 </div>
 
                 {/* Progressive Disclosure Accordion (Advanced Manual Mode) */}
@@ -620,6 +635,10 @@ export default function CourseBuilderPage({
                           placeholder="اكتب رؤوس أقلام الفهرس وسياق هذه الوحدة أو انقر زر هيكلة الفصل..."
                           disabled={isCreatingModule}
                           className="w-full p-3 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs focus:outline-none focus:border-primary transition-all resize-y font-medium"
+                        />
+                        <InlineAIRefiner
+                          currentText={moduleIndexContext}
+                          onRefined={(newText) => setModuleIndexContext(newText)}
                         />
                       </div>
 

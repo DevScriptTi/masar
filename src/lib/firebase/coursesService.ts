@@ -10,6 +10,8 @@ import {
   where,
   orderBy,
   serverTimestamp,
+  writeBatch,
+  DocumentReference,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/config";
 
@@ -194,8 +196,150 @@ export async function updateCourse(courseId: string, data: Partial<CourseDoc>): 
   });
 }
 
+/* ==========================================================================
+   DEEP CASCADING DELETION HELPERS (Cloudinary Cleanup & Batch Chunking)
+   ========================================================================== */
+
+function harvestAssetUrlsFromObject(obj: any, urlsSet: Set<string>): void {
+  if (!obj) return;
+  if (typeof obj === "string") {
+    if (obj.includes("cloudinary.com")) {
+      urlsSet.add(obj);
+    }
+    return;
+  }
+  if (Array.isArray(obj)) {
+    obj.forEach((item) => harvestAssetUrlsFromObject(item, urlsSet));
+    return;
+  }
+  if (typeof obj === "object") {
+    Object.values(obj).forEach((val) => harvestAssetUrlsFromObject(val, urlsSet));
+  }
+}
+
+async function cleanupCloudinaryAssets(urls: string[]): Promise<void> {
+  const validUrls = urls.filter((u) => typeof u === "string" && u.includes("cloudinary.com"));
+  if (validUrls.length === 0) return;
+
+  try {
+    const res = await fetch("/api/cloudinary/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ urls: validUrls }),
+    });
+    const result = await res.json();
+    console.log("Deep Cascading Cloudinary Cleanup Result:", result);
+  } catch (err) {
+    console.warn("Failed to trigger Cloudinary deletion API:", err);
+  }
+}
+
+async function commitBatchDeletions(docRefs: DocumentReference[]): Promise<void> {
+  if (docRefs.length === 0) return;
+
+  const uniqueRefsMap = new Map<string, DocumentReference>();
+  docRefs.forEach((ref) => uniqueRefsMap.set(ref.path, ref));
+  const uniqueRefs = Array.from(uniqueRefsMap.values());
+
+  const CHUNK_SIZE = 450;
+  for (let i = 0; i < uniqueRefs.length; i += CHUNK_SIZE) {
+    const chunk = uniqueRefs.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    chunk.forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+}
+
+async function harvestAndGatherActivityDeleteQueue(
+  activityId: string,
+  urlsSet: Set<string>,
+  docRefsToDelete: DocumentReference[]
+): Promise<void> {
+  const activityRef = doc(db, "activities", activityId);
+  const activitySnap = await getDoc(activityRef);
+
+  if (activitySnap.exists()) {
+    harvestAssetUrlsFromObject(activitySnap.data(), urlsSet);
+    docRefsToDelete.push(activityRef);
+  }
+
+  // 1. Submissions for this activity
+  try {
+    const subQuery = query(collection(db, "submissions"), where("activityId", "==", activityId));
+    const subSnap = await getDocs(subQuery);
+    subSnap.docs.forEach((d) => {
+      harvestAssetUrlsFromObject(d.data(), urlsSet);
+      docRefsToDelete.push(d.ref);
+    });
+  } catch (err) {
+    console.warn("Error querying submissions for deletion:", err);
+  }
+
+  // 2. Chat Sessions for this activity
+  try {
+    const chatQuery = query(collection(db, "chatSessions"), where("activityId", "==", activityId));
+    const chatSnap = await getDocs(chatQuery);
+    chatSnap.docs.forEach((d) => {
+      harvestAssetUrlsFromObject(d.data(), urlsSet);
+      docRefsToDelete.push(d.ref);
+    });
+  } catch (err) {
+    console.warn("Error querying chatSessions for deletion:", err);
+  }
+
+  // 3. Messages for this activity
+  try {
+    const msgQuery = query(collection(db, "messages"), where("activityId", "==", activityId));
+    const msgSnap = await getDocs(msgQuery);
+    msgSnap.docs.forEach((d) => {
+      harvestAssetUrlsFromObject(d.data(), urlsSet);
+      docRefsToDelete.push(d.ref);
+    });
+  } catch (err) {
+    console.warn("Error querying messages for deletion:", err);
+  }
+}
+
 export async function deleteCourse(courseId: string): Promise<void> {
-  await deleteDoc(doc(db, "courses", courseId));
+  const urlsSet = new Set<string>();
+  const docRefsToDelete: DocumentReference[] = [];
+
+  // Harvest Course doc
+  const courseRef = doc(db, "courses", courseId);
+  const courseSnap = await getDoc(courseRef);
+  if (courseSnap.exists()) {
+    harvestAssetUrlsFromObject(courseSnap.data(), urlsSet);
+    docRefsToDelete.push(courseRef);
+  }
+
+  // Harvest Child Modules
+  try {
+    const modQuery = query(collection(db, "modules"), where("courseId", "==", courseId));
+    const modSnap = await getDocs(modQuery);
+    modSnap.docs.forEach((d) => {
+      harvestAssetUrlsFromObject(d.data(), urlsSet);
+      docRefsToDelete.push(d.ref);
+    });
+  } catch (err) {
+    console.warn("Error querying modules for course deletion:", err);
+  }
+
+  // Harvest Child Activities & all subcomponents
+  try {
+    const actQuery = query(collection(db, "activities"), where("courseId", "==", courseId));
+    const actSnap = await getDocs(actQuery);
+    for (const actDoc of actSnap.docs) {
+      await harvestAndGatherActivityDeleteQueue(actDoc.id, urlsSet, docRefsToDelete);
+    }
+  } catch (err) {
+    console.warn("Error querying activities for course deletion:", err);
+  }
+
+  // 1. Delete Cloudinary assets FIRST
+  await cleanupCloudinaryAssets(Array.from(urlsSet));
+
+  // 2. Perform Firestore WriteBatch Delete
+  await commitBatchDeletions(docRefsToDelete);
 }
 
 /* ==========================================================================
@@ -257,7 +401,33 @@ export async function updateModuleVisibility(moduleId: string, isVisible: boolea
 }
 
 export async function deleteModule(moduleId: string): Promise<void> {
-  await deleteDoc(doc(db, "modules", moduleId));
+  const urlsSet = new Set<string>();
+  const docRefsToDelete: DocumentReference[] = [];
+
+  // Harvest Module doc
+  const moduleRef = doc(db, "modules", moduleId);
+  const moduleSnap = await getDoc(moduleRef);
+  if (moduleSnap.exists()) {
+    harvestAssetUrlsFromObject(moduleSnap.data(), urlsSet);
+    docRefsToDelete.push(moduleRef);
+  }
+
+  // Harvest Child Activities
+  try {
+    const actQuery = query(collection(db, "activities"), where("moduleId", "==", moduleId));
+    const actSnap = await getDocs(actQuery);
+    for (const actDoc of actSnap.docs) {
+      await harvestAndGatherActivityDeleteQueue(actDoc.id, urlsSet, docRefsToDelete);
+    }
+  } catch (err) {
+    console.warn("Error querying activities for module deletion:", err);
+  }
+
+  // 1. Delete Cloudinary assets FIRST
+  await cleanupCloudinaryAssets(Array.from(urlsSet));
+
+  // 2. Perform Firestore WriteBatch Delete
+  await commitBatchDeletions(docRefsToDelete);
 }
 
 /* ==========================================================================
@@ -319,7 +489,16 @@ export async function updateActivityVisibility(activityId: string, isVisible: bo
 }
 
 export async function deleteActivity(activityId: string): Promise<void> {
-  await deleteDoc(doc(db, "activities", activityId));
+  const urlsSet = new Set<string>();
+  const docRefsToDelete: DocumentReference[] = [];
+
+  await harvestAndGatherActivityDeleteQueue(activityId, urlsSet, docRefsToDelete);
+
+  // 1. Delete Cloudinary assets FIRST
+  await cleanupCloudinaryAssets(Array.from(urlsSet));
+
+  // 2. Perform Firestore WriteBatch Delete
+  await commitBatchDeletions(docRefsToDelete);
 }
 
 export async function getTargetingPresets(): Promise<CustomIsolationRule[]> {
