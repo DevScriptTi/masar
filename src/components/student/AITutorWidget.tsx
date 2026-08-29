@@ -45,6 +45,8 @@ export interface AITutorWidgetProps {
   submissionId?: string;
   hiddenTeacherDirectives?: string;
   moduleId?: string;
+  courseId?: string;
+  activityId?: string;
 }
 
 // Baccalaureate Math Snippets using MathLive Placeholders (#0, #?)
@@ -102,6 +104,8 @@ export function AITutorWidget({
   submissionId,
   hiddenTeacherDirectives = "",
   moduleId = "",
+  courseId = "",
+  activityId = "",
 }: AITutorWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
@@ -524,6 +528,8 @@ export function AITutorWidget({
           studentImages: forceVision ? imagesToEvaluate : [],
           hiddenTeacherDirectives: hiddenTeacherDirectives || "",
           moduleId: moduleId || "",
+          courseId: courseId || "",
+          activityId: activityId || "",
         }),
       });
 

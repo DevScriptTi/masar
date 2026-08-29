@@ -1,1 +1,2 @@
-export { generateContextAction, refineContextAction } from "../src/actions/ai.actions";
+export { generateContextAction, refineContextAction, generateStationFromAttachmentAction, type CurrentStationDraft } from "../src/actions/ai.actions";
+

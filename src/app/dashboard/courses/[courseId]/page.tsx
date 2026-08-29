@@ -727,6 +727,9 @@ export default function StudentCoursePlayerPage({
                     studentName={studentName}
                     studentEmail={studentEmail}
                     courseId={courseId}
+                    courseName={course?.title}
+                    moduleName={modules.find((m) => m.id === activeActivity.moduleId)?.title || ""}
+                    courseIndexContext={course?.courseIndexContext}
                     activityId={activeActivity.id}
                     activityTitle={activeActivity.title}
                     activityDescription={activeActivity.description}
@@ -918,6 +921,8 @@ export default function StudentCoursePlayerPage({
         aiEvaluationCache={currentAiEvaluationCache}
         hiddenTeacherDirectives={activeActivity?.hiddenTeacherDirectives}
         moduleId={activeActivity?.moduleId}
+        courseId={courseId}
+        activityId={activeActivity?.id}
         latexContent={
           activeActivity?.attachments
             ? activeActivity.attachments

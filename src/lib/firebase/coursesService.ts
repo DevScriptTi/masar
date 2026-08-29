@@ -48,8 +48,11 @@ export interface ActivityStation {
   order: number;
   initialMessage?: string;
   systemPrompt?: string;
-  content?: string;
-  aiDirectives?: string;
+  challenge?: string; // نص التمرين (The Challenge)
+  content?: string; // Backwards compatible with challenge
+  groundTruth?: string; // الحل النموذجي (Ground Truth)
+  pedagogyRules?: string; // التوصيات البيداغوجية وقواعد الوكيل (Pedagogy & Guardrails)
+  aiDirectives?: string; // Backwards compatible with pedagogyRules
   customIsolations?: any;
   isolatedStudentIds?: string[];
   targetAudience?: "all" | "specific_groups" | "specific_students" | string;

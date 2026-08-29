@@ -22,8 +22,7 @@ import {
 } from "@/src/lib/firebase/coursesService";
 import { HomeworkUploader } from "@/src/components/student/HomeworkUploader";
 import { TargetSelectionModal } from "@/src/components/admin/activities/TargetSelectionModal";
-import { InlineAIRefiner } from "@/src/components/admin/activities/InlineAIRefiner";
-import { generateContextAction, refineContextAction } from "@/actions/ai.actions";
+import { generateContextAction, refineContextAction, generateStationFromAttachmentAction } from "@/actions/ai.actions";
 import { fetchGroups, GroupDoc } from "@/src/lib/firebase/groupsService";
 import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
@@ -48,6 +47,8 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/src/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/src/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/src/components/ui/tabs";
 import {
   ChevronLeft,
   Save,
@@ -855,13 +856,143 @@ export default function ActivityEditorPage({
     );
   };
 
+  // AI-Powered Station Generation States (Strict Selected File Persistence via useRef)
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<{
+    name: string;
+    base64: string;
+    mimeType: string;
+    fileUrl?: string;
+  } | null>(null);
+  const [stationGenInstruction, setStationGenInstruction] = useState<Record<string, string>>({});
+  const [isGeneratingStation, setIsGeneratingStation] = useState<Record<string, boolean>>({});
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = reader.result as string;
+      const base64String = raw.includes(",") ? raw.split(",")[1] : raw;
+      setSelectedFile({
+        name: file.name,
+        base64: base64String,
+        mimeType: file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      toast({
+        title: "تم اختيار الملف بنجاح 📄",
+        description: `تم إعداد الملف "${file.name}" لتحليله وتوليد المحطة.`,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSelectAttachment = (attUrl: string, attName: string) => {
+    if (!attUrl) return;
+    setSelectedFile({
+      name: attName,
+      base64: "",
+      fileUrl: attUrl,
+      mimeType: attUrl.toLowerCase().includes(".pdf") ? "application/pdf" : "image/jpeg",
+    });
+    toast({
+      title: "تم اختيار المرفق 📎",
+      description: `تم ربط المرفق "${attName}" لتوليد المحطة.`,
+    });
+  };
+
+  const handleGenerateStationAI = async (stationId: string) => {
+    const targetStation = stations.find((s) => s.id === stationId);
+    const hasDraft = Boolean(
+      targetStation &&
+      ((targetStation.challenge && targetStation.challenge.trim().length > 0) ||
+       (targetStation.content && targetStation.content.trim().length > 0) ||
+       (targetStation.groundTruth && targetStation.groundTruth.trim().length > 0))
+    );
+
+    if (!selectedFile && !hasDraft) {
+      toast({
+        variant: "destructive",
+        title: "يرجى اختيار ملف أو كتابة مسودة أولاً",
+        description: "قم برفع ملف PDF / صورة أو كتابة نص للتمرين لتنقيحه وتوليد المحطة.",
+      });
+      return;
+    }
+
+    const instruction = stationGenInstruction[stationId] || "";
+    setIsGeneratingStation((prev) => ({ ...prev, [stationId]: true }));
+    toast({
+      title: hasDraft ? "جاري تنقيح المحطة وتطبيق التعليمات 🤖✨" : "جاري تحليل الوثيقة وتوليد المحطة 🤖",
+      description: hasDraft
+        ? "يقوم الوكيل المفتش بتنقيح المسودة الحالية وتطبيق التعديلات المطلوبة بدقة..."
+        : "يقوم الوكيل المفتش باستخراج التمرين، وكتابة الحل النموذجي، وصياغة التوصيات...",
+    });
+
+    try {
+      const currentDraft = targetStation
+        ? {
+            challenge: targetStation.challenge || targetStation.content || "",
+            groundTruth: targetStation.groundTruth || "",
+            pedagogyRules: targetStation.pedagogyRules || targetStation.aiDirectives || "",
+          }
+        : undefined;
+
+      const res = await generateStationFromAttachmentAction(
+        selectedFile?.fileUrl || "",
+        selectedFile?.mimeType || "application/pdf",
+        instruction,
+        selectedFile?.base64,
+        currentDraft
+      );
+
+      if (!res.success || !res.data) {
+        throw new Error(res.error || "فشل توليد / تنقيح المحطة من الذكاء الاصطناعي.");
+      }
+
+      setStations((prev) =>
+        prev.map((st) => {
+          if (st.id !== stationId) return st;
+          return {
+            ...st,
+            challenge: res.data.challenge,
+            content: res.data.challenge, // backwards compatibility
+            groundTruth: res.data.groundTruth,
+            pedagogyRules: res.data.pedagogy,
+            aiDirectives: res.data.pedagogy, // backwards compatibility
+          };
+        })
+      );
+
+      toast({
+        title: hasDraft ? "تم تنقيح المحطة بنجاح ✨" : "تم توليد المحطة بنجاح ✨",
+        description: "تم تحديث نص التمرين، والحل النموذجي، والتوصيات البيداغوجية بنجاح!",
+      });
+    } catch (err: any) {
+      console.error("Generate Station AI error:", err);
+      toast({
+        variant: "destructive",
+        title: "فشل العملية",
+        description: err.message || "حدث خطأ أثناء الاتصال بنموذج الذكاء الاصطناعي.",
+      });
+    } finally {
+      setIsGeneratingStation((prev) => ({ ...prev, [stationId]: false }));
+      // CRITICAL: Do NOT clear selectedFile here! Let user keep file for multiple iterations.
+    }
+  };
+
   // Station Handlers
   const handleAddStation = () => {
     const newStation: ActivityStation = {
       id: `station_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       order: stations.length + 1,
       title: `المحطة ${stations.length + 1}`,
+      challenge: "",
       content: "",
+      groundTruth: "",
+      pedagogyRules: "",
       aiDirectives: "",
       targetAudience: "all",
       targetIds: [],
@@ -1887,175 +2018,459 @@ export default function ActivityEditorPage({
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        {stations.map((st, idx) => (
-                          <div
-                            key={st.id}
-                            className="p-5 rounded-2xl bg-surface-variant/20 border border-outline/20 space-y-4 transition-all hover:border-primary/30 shadow-2xs"
-                          >
-                            {/* Station Card Header */}
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-outline/10 pb-3">
-                              <div className="flex items-center gap-2 flex-1">
-                                <span className="w-7 h-7 rounded-xl bg-primary text-on-primary font-extrabold text-xs flex items-center justify-center shrink-0 shadow-2xs">
-                                  {st.order || idx + 1}
-                                </span>
-                                <input
-                                  type="text"
-                                  value={st.title}
-                                  onChange={(e) => handleUpdateStation(st.id, "title", e.target.value)}
-                                  placeholder={`عنوان المحطة #${idx + 1} (مثال: المحطة 1 - حساب النهاية)...`}
-                                  className="w-full h-10 px-3.5 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs font-bold focus:outline-none focus:border-primary transition-all"
-                                />
-                              </div>
+                        {stations.map((st, idx) => {
+                          const isGenerating = isGeneratingStation[st.id] || false;
+                          const hasDraft = Boolean(
+                            (st.challenge && st.challenge.trim().length > 0) ||
+                            (st.content && st.content.trim().length > 0) ||
+                            (st.groundTruth && st.groundTruth.trim().length > 0)
+                          );
+                          const canGenerate = Boolean(selectedFile || hasDraft);
 
-                              {/* Station Actions (Up/Down Reorder & Delete) */}
-                              <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveStation(idx, "up")}
-                                  disabled={idx === 0}
-                                  className="p-2 rounded-xl bg-surface border border-outline/20 text-on-surface-variant hover:text-primary hover:border-primary/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
-                                  title="تحريك للأعلى"
-                                >
-                                  <ArrowUp className="w-3.5 h-3.5" />
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveStation(idx, "down")}
-                                  disabled={idx === stations.length - 1}
-                                  className="p-2 rounded-xl bg-surface border border-outline/20 text-on-surface-variant hover:text-primary hover:border-primary/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
-                                  title="تحريك للأسفل"
-                                >
-                                  <ArrowDown className="w-3.5 h-3.5" />
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveStation(st.id)}
-                                  className="p-2 rounded-xl bg-error/10 text-error hover:bg-error hover:text-on-error transition-all cursor-pointer"
-                                  title="إزالة المحطة"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Station Content Fields */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              {/* Field 1: Station Sub-Task / Focus */}
-                              <div className="space-y-1.5">
-                                <label className="block text-xs font-bold text-on-surface flex items-center gap-1.5">
-                                  <FileText className="w-3.5 h-3.5 text-primary" />
-                                  <span>المهمة الحالية للوكيل (Current Sub-task/Focus)</span>
-                                </label>
-                                <textarea
-                                  value={st.content}
-                                  onChange={(e) => handleUpdateStation(st.id, "content", e.target.value)}
-                                  rows={3}
-                                  placeholder="حدد هنا السؤال أو الجزء المطلوب في هذه المحطة فقط (مثال: المطالبة بحساب النهاية عند الصفر)..."
-                                  className="w-full p-3.5 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs focus:outline-none focus:border-primary transition-all font-medium resize-y"
-                                />
-                              </div>
-
-                              {/* Field 2: Station AI Directives */}
-                              <div className="space-y-1.5">
-                                <label className="block text-xs font-bold text-on-surface flex items-center gap-1.5">
-                                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                                  <span>توجيهات سرية للوكيل حول هذا التمرين (AI Directives)</span>
-                                </label>
-                                <textarea
-                                  value={st.aiDirectives}
-                                  onChange={(e) => handleUpdateStation(st.id, "aiDirectives", e.target.value)}
-                                  rows={3}
-                                  placeholder="تعليمات سرية خاصة بالذكاء الاصطناعي لهذه المحطة (مثال: عدم إعطاء الناتج النهائي، والتركيز على خطوة توحيد المقامات)..."
-                                  className="w-full p-3.5 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs focus:outline-none focus:border-primary transition-all font-medium resize-y"
-                                />
-                              </div>
-                            </div>
-
-                            {/* Station Targeting & Isolation Box */}
-                            <div className="p-4 rounded-xl bg-surface-variant/40 border border-outline/20 space-y-3.5">
-                              <div className="flex items-center justify-between border-b border-outline/10 pb-2 flex-wrap gap-2">
-                                <div className="flex items-center gap-2">
-                                  <Users className="w-4 h-4 text-primary" />
-                                  <h4 className="text-xs font-bold text-on-surface">
-                                    عزل وتخصيص الفئة المستهدفة للمحطة (Station Isolation & Targeting)
-                                  </h4>
+                          return (
+                            <div
+                              key={st.id}
+                              className="p-5 rounded-2xl bg-surface-variant/20 border border-outline/20 space-y-4 transition-all hover:border-primary/30 shadow-2xs"
+                            >
+                              {/* Station Card Header */}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-outline/10 pb-3">
+                                <div className="flex items-center gap-2 flex-1">
+                                  <span className="w-7 h-7 rounded-xl bg-primary text-on-primary font-extrabold text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                                    {st.order || idx + 1}
+                                  </span>
+                                  <input
+                                    type="text"
+                                    value={st.title}
+                                    onChange={(e) => handleUpdateStation(st.id, "title", e.target.value)}
+                                    placeholder={`عنوان المحطة #${idx + 1} (مثال: المحطة 1 - حساب النهاية)...`}
+                                    className="w-full h-10 px-3.5 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs font-bold focus:outline-none focus:border-primary transition-all"
+                                  />
                                 </div>
 
-                                <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto pt-1 sm:pt-0">
-                                  <div className="flex items-center gap-1.5 flex-1 sm:flex-initial">
-                                    <FolderDown className="w-3.5 h-3.5 text-primary shrink-0" />
-                                    <select
-                                      defaultValue=""
-                                      onChange={(e) => {
-                                        if (e.target.value) {
-                                          handleApplyPreset(st.id, e.target.value);
-                                          e.target.value = "";
-                                        }
-                                      }}
-                                      className="h-8 px-2.5 rounded-lg bg-surface border border-outline/30 text-on-surface text-[11px] font-bold focus:outline-none focus:border-primary transition-all max-w-[200px]"
-                                    >
-                                      <option value="" disabled>
-                                        -- استيراد قالب عزل محفوظ ({targetingPresetsList.length}) --
-                                      </option>
-                                      {targetingPresetsList.map((preset) => (
-                                        <option key={preset.id} value={preset.id}>
-                                          {preset.presetName}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
+                                {/* Station Actions (Up/Down Reorder & Delete) */}
+                                <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveStation(idx, "up")}
+                                    disabled={idx === 0}
+                                    className="p-2 rounded-xl bg-surface border border-outline/20 text-on-surface-variant hover:text-primary hover:border-primary/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                                    title="تحريك للأعلى"
+                                  >
+                                    <ArrowUp className="w-3.5 h-3.5" />
+                                  </button>
 
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenSavePresetModal(st)}
-                                    className="px-3 h-8 rounded-lg bg-primary/10 text-primary border border-primary/30 font-bold text-[11px] hover:bg-primary/20 transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                                    onClick={() => handleMoveStation(idx, "down")}
+                                    disabled={idx === stations.length - 1}
+                                    className="p-2 rounded-xl bg-surface border border-outline/20 text-on-surface-variant hover:text-primary hover:border-primary/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                                    title="تحريك للأسفل"
                                   >
-                                    <BookmarkPlus className="w-3.5 h-3.5" />
-                                    <span>حفظ كقالب جديد</span>
+                                    <ArrowDown className="w-3.5 h-3.5" />
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveStation(st.id)}
+                                    className="p-2 rounded-xl bg-error/10 text-error hover:bg-error hover:text-on-error transition-all cursor-pointer"
+                                    title="إزالة المحطة"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
                               </div>
 
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                  <label className="block text-xs font-bold text-on-surface-variant">
-                                    الفئة المستهدفة (العزل)
-                                  </label>
-                                  <select
-                                    value={st.targetAudience || "all"}
-                                    onChange={(e) =>
-                                      handleUpdateStation(
-                                        st.id,
-                                        "targetAudience",
-                                        e.target.value as any
-                                      )
-                                    }
-                                    className="w-full h-10 px-3 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs font-bold focus:outline-none focus:border-primary transition-all"
-                                  >
-                                    <option value="all">جميع التلاميذ (All)</option>
-                                    <option value="specific_groups">أفواج محددة (Specific Groups)</option>
-                                    <option value="specific_students">تلاميذ محددون (Specific Students)</option>
-                                  </select>
+                              {/* AI Auto-Generator Action Bar (HITL & A2A Inspector Agent) */}
+                              <div className="p-4 rounded-2xl bg-gradient-to-r from-primary/10 via-indigo-500/10 to-surface-variant/30 border border-primary/20 space-y-3 mb-4">
+                                {/* HIDDEN INPUT CONTROLLED VIA useRef */}
+                                <input
+                                  type="file"
+                                  ref={fileInputRef}
+                                  onChange={handleFileChange}
+                                  className="hidden"
+                                  accept="image/*,application/pdf"
+                                />
+
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="flex items-center gap-2">
+                                    <Bot className="w-4 h-4 text-primary" />
+                                    <span className="text-xs font-extrabold text-on-surface">
+                                      توليد وتنقيح المحطة الذكي (AI Inspector - Gemini 3.6 Flash)
+                                    </span>
+                                  </div>
+
+                                  {selectedFile && (
+                                    <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-lg flex items-center gap-1">
+                                      <FileUp className="w-3 h-3" />
+                                      <span>الملف المرفق: {selectedFile.name}</span>
+                                    </span>
+                                  )}
                                 </div>
 
-                                <div className="space-y-1.5">
-                                  <label className="block text-xs font-bold text-on-surface-variant">
-                                    ملاحظة إضافية لسياق الوكيل (اختياري)
-                                  </label>
-                                  <textarea
-                                    value={st.stationContextNote || ""}
-                                    onChange={(e) => handleUpdateStation(st.id, "stationContextNote", e.target.value)}
-                                    rows={2}
-                                    placeholder="ملاحظة مخصصة يقرأها الذكاء الاصطناعي لهذه المحطة تحديداً..."
-                                    className="w-full p-2.5 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs font-medium focus:outline-none focus:border-primary transition-all resize-y"
+                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                                  {/* UPLOAD BUTTON OR FILE BADGE */}
+                                  <div className="shrink-0 flex items-center gap-1.5">
+                                    {selectedFile ? (
+                                      <div className="flex items-center gap-2 bg-primary/10 text-primary px-3 py-1.5 rounded-xl border border-primary/30 h-10 shadow-2xs">
+                                        <span className="text-xs font-bold truncate max-w-[160px]">📄 {selectedFile.name}</span>
+                                        <button 
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            setSelectedFile(null);
+                                          }}
+                                          className="text-primary hover:text-red-500 transition-colors p-1 rounded-lg cursor-pointer"
+                                          title="إزالة وتغيير الملف"
+                                        >
+                                          <X className="w-4 h-4"/>
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            fileInputRef.current?.click();
+                                          }}
+                                          className="h-10 px-3.5 rounded-xl bg-surface border border-outline/30 hover:border-primary/50 text-on-surface text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs hover:bg-surface-variant/30 cursor-pointer shrink-0"
+                                        >
+                                          <Upload className="w-4 h-4 text-primary" />
+                                          <span>رفع ملف (PDF / صورة)</span>
+                                        </button>
+
+                                        {attachments.length > 0 && (
+                                          <select
+                                            defaultValue=""
+                                            onChange={(e) => {
+                                              if (e.target.value) {
+                                                const found = attachments.find((a: any) =>
+                                                  typeof a === "string" ? a === e.target.value : a.url === e.target.value
+                                                );
+                                                const attName = typeof found === "string" ? "مرفق النشاط" : (found as any)?.title || "مرفق النشاط";
+                                                handleSelectAttachment(e.target.value, attName);
+                                                e.target.value = "";
+                                              }
+                                            }}
+                                            className="h-10 px-2.5 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs font-bold focus:outline-none focus:border-primary transition-all max-w-[170px]"
+                                          >
+                                            <option value="" disabled>
+                                              -- من مرفقات النشاط ({attachments.length}) --
+                                            </option>
+                                            {attachments.map((att: any, aIdx: number) => {
+                                              const url = typeof att === "string" ? att : att.url;
+                                              const name = typeof att === "string" ? `مرفق #${aIdx + 1}` : att.title || `مرفق #${aIdx + 1}`;
+                                              return (
+                                                <option key={aIdx} value={url}>
+                                                  {name}
+                                                </option>
+                                              );
+                                            })}
+                                          </select>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* INSTRUCTION INPUT */}
+                                  <input
+                                    type="text"
+                                    value={stationGenInstruction[st.id] || ""}
+                                    onChange={(e) =>
+                                      setStationGenInstruction((prev) => ({
+                                        ...prev,
+                                        [st.id]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={
+                                      hasDraft
+                                        ? "تعليمات التنقيح (مثال: أعد صياغة الأسئلة وجعلها مرقمة مع السطر الجديد...)"
+                                        : "تعليمات الاستخراج (مثال: استخرج التمرين الأول واكتب حله المفصل)..."
+                                    }
+                                    className="flex-1 h-10 px-3.5 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs font-medium focus:outline-none focus:border-primary transition-all"
                                   />
+
+                                  {/* GENERATE / REFINE BUTTON */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      handleGenerateStationAI(st.id);
+                                    }}
+                                    disabled={isGenerating || !canGenerate}
+                                    className="h-10 px-4 rounded-xl bg-primary text-on-primary font-bold text-xs hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5 shadow-md shrink-0 cursor-pointer"
+                                  >
+                                    {isGenerating ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>{hasDraft && !selectedFile ? "جاري التنقيح..." : "جاري التوليد..."}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        {hasDraft && !selectedFile ? (
+                                          <Sparkles className="w-3.5 h-3.5" />
+                                        ) : (
+                                          <Wand2 className="w-3.5 h-3.5" />
+                                        )}
+                                        <span>
+                                          {hasDraft && !selectedFile
+                                            ? "تنقيح المحطة بالذكاء الاصطناعي"
+                                            : "توليد المحطة بالذكاء الاصطناعي"}
+                                        </span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Station 3 Main Fields (Full-Width Tabs with Rich Text Editor + MathText Preview Dialogs) */}
+                              <div className="bg-surface/50 p-4 rounded-2xl border border-outline/20 space-y-4">
+                                <Tabs defaultValue="challenge" className="w-full">
+                                  <TabsList className="grid w-full grid-cols-3 mb-4 bg-surface-variant/40 p-1 rounded-xl">
+                                    <TabsTrigger value="challenge" className="flex items-center justify-center gap-1.5 py-2">
+                                      <FileText className="w-4 h-4 text-primary shrink-0" />
+                                      <span className="font-bold text-xs truncate">نص التمرين (The Challenge)</span>
+                                    </TabsTrigger>
+                                    <TabsTrigger value="groundTruth" className="flex items-center justify-center gap-1.5 py-2">
+                                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                                      <span className="font-bold text-xs truncate">الحل النموذجي (Ground Truth)</span>
+                                    </TabsTrigger>
+                                    <TabsTrigger value="pedagogy" className="flex items-center justify-center gap-1.5 py-2">
+                                      <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                                      <span className="font-bold text-xs truncate">التوصيات البيداغوجية (Guardrails)</span>
+                                    </TabsTrigger>
+                                  </TabsList>
+
+                                  {/* Tab 1: Challenge */}
+                                  <TabsContent value="challenge" className="space-y-3 mt-0">
+                                    <div className="flex justify-between items-center">
+                                      <label className="text-xs font-bold text-on-surface flex items-center gap-1.5">
+                                        <FileText className="w-4 h-4 text-primary" />
+                                        <span>نص التمرين (The Challenge) - يظهر للتلميذ</span>
+                                      </label>
+                                      
+                                      {/* The Preview Modal Trigger */}
+                                      <Dialog>
+                                        <DialogTrigger asChild>
+                                          <button
+                                            type="button"
+                                            className="h-7 px-3 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                                          >
+                                            <Eye className="w-3.5 h-3.5" />
+                                            <span>معاينة الرياضيات والنص</span>
+                                          </button>
+                                        </DialogTrigger>
+                                        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto" dir="rtl">
+                                          <DialogHeader>
+                                            <DialogTitle className="text-base font-extrabold flex items-center gap-2">
+                                              <FileText className="w-4 h-4 text-primary" />
+                                              <span>معاينة: نص التمرين (The Challenge)</span>
+                                            </DialogTitle>
+                                          </DialogHeader>
+                                          <div className="p-5 bg-surface-variant/20 border border-outline/20 rounded-2xl max-w-none mt-4 text-sm leading-relaxed whitespace-pre-wrap">
+                                            {st.challenge || st.content ? (
+                                              <MathText content={st.challenge || st.content} />
+                                            ) : (
+                                              <span className="text-on-surface-variant/60 italic">لا يوجد محتوى للمعاينة</span>
+                                            )}
+                                          </div>
+                                        </DialogContent>
+                                      </Dialog>
+                                    </div>
+
+                                    <div className="w-full">
+                                      <RichTextEditor
+                                        value={st.challenge ?? st.content ?? ""}
+                                        onChange={(val) => {
+                                          handleUpdateStation(st.id, "challenge", val);
+                                          handleUpdateStation(st.id, "content", val);
+                                        }}
+                                        placeholder="اكتب نص وسؤال التمرين باللغة العربية مع صيغ اللاتكس الرياضية $ ... $ (مثال: احسب النهاية: $\lim\limits_{x \to 0} \frac{\sin x}{x}$)..."
+                                      />
+                                    </div>
+                                  </TabsContent>
+
+                                  {/* Tab 2: Ground Truth */}
+                                  <TabsContent value="groundTruth" className="space-y-3 mt-0">
+                                    <div className="flex justify-between items-center">
+                                      <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                                        <span>الحل النموذجي (Ground Truth) - مخفي عن التلميذ (معيار التقييم)</span>
+                                      </label>
+                                      
+                                      {/* The Preview Modal Trigger */}
+                                      <Dialog>
+                                        <DialogTrigger asChild>
+                                          <button
+                                            type="button"
+                                            className="h-7 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                                          >
+                                            <Eye className="w-3.5 h-3.5" />
+                                            <span>معاينة الحل والرياضيات</span>
+                                          </button>
+                                        </DialogTrigger>
+                                        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto" dir="rtl">
+                                          <DialogHeader>
+                                            <DialogTitle className="text-base font-extrabold flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                                              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                                              <span>معاينة: الحل النموذجي المعتمد (Ground Truth)</span>
+                                            </DialogTitle>
+                                          </DialogHeader>
+                                          <div className="p-5 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl max-w-none mt-4 text-sm leading-relaxed whitespace-pre-wrap">
+                                            {st.groundTruth ? (
+                                              <MathText content={st.groundTruth} />
+                                            ) : (
+                                              <span className="text-on-surface-variant/60 italic">لا يوجد حل نموذجي للمعاينة</span>
+                                            )}
+                                          </div>
+                                        </DialogContent>
+                                      </Dialog>
+                                    </div>
+
+                                    <div className="w-full">
+                                      <RichTextEditor
+                                        value={st.groundTruth || ""}
+                                        onChange={(val) => handleUpdateStation(st.id, "groundTruth", val)}
+                                        placeholder="اكتب الحل الرياضي النموذجي والمفصل خطوة بخطوة باللاتكس كمعيار تقييم حصري للذكاء الاصطناعي..."
+                                      />
+                                    </div>
+                                  </TabsContent>
+
+                                  {/* Tab 3: Pedagogy */}
+                                  <TabsContent value="pedagogy" className="space-y-3 mt-0">
+                                    <div className="flex justify-between items-center">
+                                      <label className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                                        <Sparkles className="w-4 h-4 text-amber-500" />
+                                        <span>التوصيات البيداغوجية وقواعد التوجيه (Pedagogy & Guardrails)</span>
+                                      </label>
+                                      
+                                      {/* The Preview Modal Trigger */}
+                                      <Dialog>
+                                        <DialogTrigger asChild>
+                                          <button
+                                            type="button"
+                                            className="h-7 px-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                                          >
+                                            <Eye className="w-3.5 h-3.5" />
+                                            <span>معاينة التوصيات</span>
+                                          </button>
+                                        </DialogTrigger>
+                                        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto" dir="rtl">
+                                          <DialogHeader>
+                                            <DialogTitle className="text-base font-extrabold flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                                              <Sparkles className="w-4 h-4 text-amber-500" />
+                                              <span>معاينة: التوصيات البيداغوجية وقواعد التوجيه (Pedagogy & Guardrails)</span>
+                                            </DialogTitle>
+                                          </DialogHeader>
+                                          <div className="p-5 bg-amber-500/5 border border-amber-500/20 rounded-2xl max-w-none mt-4 text-sm leading-relaxed whitespace-pre-wrap">
+                                            {st.pedagogyRules || st.aiDirectives ? (
+                                              <MathText content={st.pedagogyRules || st.aiDirectives} />
+                                            ) : (
+                                              <span className="text-on-surface-variant/60 italic">لا توجد توصيات بيداغوجية للمعاينة</span>
+                                            )}
+                                          </div>
+                                        </DialogContent>
+                                      </Dialog>
+                                    </div>
+
+                                    <div className="w-full">
+                                      <RichTextEditor
+                                        value={st.pedagogyRules ?? st.aiDirectives ?? ""}
+                                        onChange={(val) => {
+                                          handleUpdateStation(st.id, "pedagogyRules", val);
+                                          handleUpdateStation(st.id, "aiDirectives", val);
+                                        }}
+                                        placeholder="تعليمات وتوجيهات بيداغوجية صارمة للمساعد السقراطي (مثال: ممنوع إعطاء الحل النهائي، وجه التلميذ للضرب في المرافق)..."
+                                      />
+                                    </div>
+                                  </TabsContent>
+                                </Tabs>
+                              </div>
+
+                              {/* Station Targeting & Isolation Box */}
+                              <div className="p-4 rounded-xl bg-surface-variant/40 border border-outline/20 space-y-3.5">
+                                <div className="flex items-center justify-between border-b border-outline/10 pb-2 flex-wrap gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <Users className="w-4 h-4 text-primary" />
+                                    <h4 className="text-xs font-bold text-on-surface">
+                                      عزل وتخصيص الفئة المستهدفة للمحطة (Station Isolation & Targeting)
+                                    </h4>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto pt-1 sm:pt-0">
+                                    <div className="flex items-center gap-1.5 flex-1 sm:flex-initial">
+                                      <FolderDown className="w-3.5 h-3.5 text-primary shrink-0" />
+                                      <select
+                                        defaultValue=""
+                                        onChange={(e) => {
+                                          if (e.target.value) {
+                                            handleApplyPreset(st.id, e.target.value);
+                                            e.target.value = "";
+                                          }
+                                        }}
+                                        className="h-8 px-2.5 rounded-lg bg-surface border border-outline/30 text-on-surface text-[11px] font-bold focus:outline-none focus:border-primary transition-all max-w-[200px]"
+                                      >
+                                        <option value="" disabled>
+                                          -- استيراد قالب عزل محفوظ ({targetingPresetsList.length}) --
+                                        </option>
+                                        {targetingPresetsList.map((preset) => (
+                                          <option key={preset.id} value={preset.id}>
+                                            {preset.presetName}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenSavePresetModal(st)}
+                                      className="px-3 h-8 rounded-lg bg-primary/10 text-primary border border-primary/30 font-bold text-[11px] hover:bg-primary/20 transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                                    >
+                                      <BookmarkPlus className="w-3.5 h-3.5" />
+                                      <span>حفظ كقالب جديد</span>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  <div className="space-y-1.5">
+                                    <label className="block text-xs font-bold text-on-surface-variant">
+                                      الفئة المستهدفة (العزل)
+                                    </label>
+                                    <select
+                                      value={st.targetAudience || "all"}
+                                      onChange={(e) =>
+                                        handleUpdateStation(
+                                          st.id,
+                                          "targetAudience",
+                                          e.target.value as any
+                                        )
+                                      }
+                                      className="w-full h-10 px-3 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs font-bold focus:outline-none focus:border-primary transition-all"
+                                    >
+                                      <option value="all">جميع التلاميذ (All)</option>
+                                      <option value="specific_groups">أفواج محددة (Specific Groups)</option>
+                                      <option value="specific_students">تلاميذ محددون (Specific Students)</option>
+                                    </select>
+                                  </div>
+
+                                  <div className="space-y-1.5">
+                                    <label className="block text-xs font-bold text-on-surface-variant">
+                                      ملاحظة إضافية لسياق الوكيل (اختياري)
+                                    </label>
+                                    <textarea
+                                      value={st.stationContextNote || ""}
+                                      onChange={(e) => handleUpdateStation(st.id, "stationContextNote", e.target.value)}
+                                      rows={2}
+                                      placeholder="ملاحظة مخصصة يقرأها الذكاء الاصطناعي لهذه المحطة تحديداً..."
+                                      className="w-full p-2.5 rounded-xl bg-surface border border-outline/30 text-on-surface text-xs font-medium focus:outline-none focus:border-primary transition-all resize-y"
+                                    />
+                                  </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
 
                         <button
                           type="button"

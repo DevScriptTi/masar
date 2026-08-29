@@ -19,6 +19,7 @@ import { ActivityStation } from "@/src/lib/firebase/coursesService";
 import { HomeworkUploader } from "@/src/components/student/HomeworkUploader";
 import { MathText } from "@/src/components/admin/activities/StudentPreview";
 import { MathScratchpad } from "@/src/components/student/MathScratchpad";
+import TextareaAutosize from "react-textarea-autosize";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import Lightbox from "yet-another-react-lightbox";
@@ -59,6 +60,9 @@ export interface SocraticStationChatProps {
   studentName: string;
   studentEmail?: string;
   courseId: string;
+  courseName?: string;
+  moduleName?: string;
+  courseIndexContext?: string;
   activityId: string;
   activityTitle: string;
   activityDescription?: string;
@@ -222,6 +226,9 @@ export function SocraticStationChat({
   studentName,
   studentEmail,
   courseId,
+  courseName,
+  moduleName,
+  courseIndexContext,
   activityId,
   activityTitle,
   activityDescription,
@@ -249,6 +256,10 @@ export function SocraticStationChat({
   const [showImageUploader, setShowImageUploader] = useState(false);
   const [isAiThinking, setIsAiThinking] = useState(false);
 
+  // Auto-scroll & Textarea Refs
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   // MathScratchpad & Unified Textarea Math Editing States
   const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
   const [editingEquationLatex, setEditingEquationLatex] = useState<string | null>(null);
@@ -270,6 +281,11 @@ export function SocraticStationChat({
   }, [stationChats, currentStationKey]);
 
   const [isFetchingChatHistory, setIsFetchingChatHistory] = useState(true);
+
+  // Auto-scroll to bottom on new messages or AI thinking state change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [currentStationMessages, isAiThinking]);
 
   // Step A: Fetch station chat history from Firestore on mount & when station/student changes
   useEffect(() => {
@@ -401,8 +417,6 @@ export function SocraticStationChat({
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [lightboxSlides, setLightboxSlides] = useState<Array<{ src: string }>>([]);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   const handleOpenScratchpadNew = () => {
     setEditingEquationLatex(null);
     setScratchpadInitialLatex("");
@@ -502,7 +516,7 @@ export function SocraticStationChat({
       let initialGreetingText = "";
 
       if (hasStations && currentStation) {
-        initialGreetingText = `مرحباً بك في **${currentStation.title || `المحطة #${activeStationIndex + 1}`}**! 👋\n\n**المهمة الحالية المطلوبة منك:**\n${currentStation.content || "قم بحل المطلوب وتزويد المساعد الذكي بإجابتك"}\n\nاكتب إجابتك أو أرفق صورة لحلك اليدوي لمراجعتها وتوجيهك سقراطياً!`;
+        initialGreetingText = `مرحباً بك في **${currentStation.title || `المحطة #${activeStationIndex + 1}`}**! 👋\n\n**المهمة الحالية المطلوبة منك:**\n${currentStation.challenge || currentStation.content || "قم بحل المطلوب وتزويد المساعد الذكي بإجابتك"}\n\nاكتب إجابتك أو أرفق صورة لحلك اليدوي لمراجعتها وتوجيهك سقراطياً!`;
       } else {
         // Requirement 3: Global Lesson Assistant greeting when stations.length === 0
         initialGreetingText = `مرحباً بك! 👋 أنا مساعدك الذكي لدرس **${activityTitle}**.\n\nهل لديك أي سؤال حول مفاهيم أو تمارين هذا الدرس؟ تفضل بطرح سؤالك أو أرفق صورة إجابتك المباشرة وسأساعدك خطوة بخطوة!`;
@@ -637,6 +651,14 @@ export function SocraticStationChat({
           isStationMode: hasStations,
           studentId,
           studentName,
+          courseId,
+          courseName: courseName || "",
+          courseTitle: courseName || "",
+          moduleName: moduleName || "",
+          moduleTitle: moduleName || "",
+          courseIndexContext: courseIndexContext || "",
+          activityId,
+          activityTitle,
           globalContext: globalLatexSummary || activityDescription || activityTitle,
           globalIsolationNote: globalIsoNote,
           referenceImageUrls: referenceImageUrls || [],
@@ -819,7 +841,7 @@ export function SocraticStationChat({
             المهمة المطلوبة في {currentStation.title || `المحطة #${activeStationIndex + 1}`}:
           </span>
           <div className="text-xs font-medium text-on-surface">
-            <MathText content={currentStation.content} />
+            <MathText content={currentStation.challenge || currentStation.content} />
           </div>
         </div>
       )}
@@ -891,6 +913,9 @@ export function SocraticStationChat({
             <span>جاري تحليل إجابتك وسياق المحطة بواسطة المساعد الذكي...</span>
           </div>
         )}
+
+        {/* Anchor for Auto-Scroll to Bottom */}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Live Message Preview */}
@@ -973,11 +998,13 @@ export function SocraticStationChat({
 
       {/* Bottom Input Controls Bar (Fixed Bottom in Fullscreen & Mobile) */}
       <div className={`shrink-0 p-2.5 sm:p-3 bg-surface border-t border-outline/25 z-20 ${isFullscreen ? "w-full" : "rounded-2xl border shadow-2xs"}`} dir="rtl">
-        <div className="flex flex-col gap-2 w-full">
-          {/* Main Input Textarea */}
-          <textarea
-            ref={textareaRef}
-            rows={2}
+        {/* Fabulous Sleek Modern Input Card Wrapper */}
+        <div className="relative flex flex-col w-full rounded-2xl bg-surface border border-outline/20 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50 transition-all duration-300 shadow-sm p-2 gap-2">
+          {/* Main Input TextareaAutosize */}
+          <TextareaAutosize
+            ref={textareaRef as any}
+            minRows={1}
+            maxRows={5}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => {
@@ -987,48 +1014,48 @@ export function SocraticStationChat({
               }
             }}
             placeholder="اكتب إجابتك، أو استخدم مسودة إضافة المعادلات بالضغط على (+ إضافة معادلة)..."
-            className="w-full min-h-[44px] max-h-36 p-3 rounded-xl bg-surface-variant/30 border border-outline/20 text-on-surface text-xs font-medium focus:outline-none focus:border-primary resize-y font-arabic leading-relaxed text-right dir-rtl"
+            className="w-full bg-transparent resize-none p-3 text-sm outline-none placeholder:text-muted-foreground font-arabic leading-relaxed text-right dir-rtl text-on-surface"
           />
 
           {/* Action Button Group */}
-          <div className="flex justify-between items-center w-full">
+          <div className="flex justify-between items-center w-full pt-1.5 border-t border-outline/10">
             <div className="flex items-center gap-1.5 flex-wrap">
               {/* Math Scratchpad Icon Button */}
               <button
                 type="button"
                 onClick={handleOpenScratchpadNew}
-                className={`w-10 h-10 sm:w-11 sm:h-11 rounded-2xl border transition-all flex items-center justify-center shrink-0 cursor-pointer ${
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl border transition-all flex items-center justify-center shrink-0 cursor-pointer ${
                   isScratchpadOpen
                     ? "bg-primary/20 border-primary text-primary shadow-xs scale-105"
                     : "bg-surface-variant/40 border-outline/20 text-on-surface-variant hover:text-primary hover:bg-primary/10 hover:border-primary/40"
                 }`}
                 title="إضافة معادلة رياضية (Math Scratchpad)"
               >
-                <Calculator className="w-4 h-4 sm:w-5 sm:h-5" />
+                <Calculator className="w-4 h-4" />
               </button>
 
               {/* Image Upload Icon Button */}
               <button
                 type="button"
                 onClick={() => setShowImageUploader(!showImageUploader)}
-                className={`w-10 h-10 sm:w-11 sm:h-11 rounded-2xl border transition-all flex items-center justify-center shrink-0 cursor-pointer ${
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl border transition-all flex items-center justify-center shrink-0 cursor-pointer ${
                   showImageUploader || attachedImages.length > 0
                     ? "bg-primary/20 border-primary text-primary shadow-xs scale-105"
                     : "bg-surface-variant/40 border-outline/20 text-on-surface-variant hover:text-primary hover:bg-primary/10 hover:border-primary/40"
                 }`}
                 title="إرفاق صورة الحل اليدوي أو المسودة"
               >
-                <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                <ImageIcon className="w-4 h-4" />
               </button>
 
               {/* Context Debug Icon Button (Teacher Context Inspector) */}
               <button
                 type="button"
                 onClick={() => setIsDebugModalOpen(true)}
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-2xs hover:scale-105"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-2xs hover:scale-105"
                 title="فحص سياق الوكيل السقراطي (Context Debug)"
               >
-                <Bug className="w-4 h-4 sm:w-5 sm:h-5" />
+                <Bug className="w-4 h-4" />
               </button>
 
               {/* Clear Chat Icon Button (Wipe Station Chat History) */}
@@ -1036,33 +1063,37 @@ export function SocraticStationChat({
                 type="button"
                 onClick={handleClearChat}
                 disabled={currentStationMessages.length === 0}
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-error/10 hover:bg-error/20 text-error border border-error/30 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-2xs hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-error/10 hover:bg-error/20 text-error border border-error/30 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-2xs hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed"
                 title="مسح سجل محادثة هذه المحطة (Clear Chat)"
               >
-                <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                <Trash2 className="w-4 h-4" />
               </button>
 
               {/* Fullscreen / Focus Mode Toggle Button */}
               <button
                 type="button"
                 onClick={() => setIsFullscreen(!isFullscreen)}
-                className={`w-10 h-10 sm:w-11 sm:h-11 rounded-2xl border transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-2xs hover:scale-105 active:scale-95 ${
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl border transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-2xs hover:scale-105 active:scale-95 ${
                   isFullscreen
                     ? "bg-primary/20 border-primary text-primary shadow-xs scale-105"
                     : "bg-surface-variant/40 border-outline/20 text-on-surface-variant hover:text-primary hover:bg-primary/10 hover:border-primary/40"
                 }`}
                 title={isFullscreen ? "إنهاء وضع ملء الشاشة (Minimize)" : "وضع ملء الشاشة والتركيز (Fullscreen)"}
               >
-                {isFullscreen ? <Minimize2 className="w-4 h-4 sm:w-5 sm:h-5 text-primary" /> : <Maximize2 className="w-4 h-4 sm:w-5 sm:h-5" />}
+                {isFullscreen ? <Minimize2 className="w-4 h-4 text-primary" /> : <Maximize2 className="w-4 h-4" />}
               </button>
             </div>
 
-            {/* Send Button */}
+            {/* Dynamic Send Button */}
             <button
               type="button"
               onClick={() => handleSendMessage()}
               disabled={!inputText.trim() && attachedImages.length === 0}
-              className="h-10 sm:h-11 px-4 sm:px-5 rounded-xl bg-primary text-on-primary font-bold text-xs hover:bg-primary/90 transition-all shadow-md flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+              className={`h-9 sm:h-10 px-4 sm:px-5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all duration-200 ${
+                inputText.trim().length > 0 || attachedImages.length > 0
+                  ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 transform active:scale-95 cursor-pointer"
+                  : "opacity-50 cursor-not-allowed bg-muted text-muted-foreground"
+              }`}
             >
               <span>إرسال</span>
               <Send className="w-3.5 h-3.5" />
@@ -1098,23 +1129,36 @@ export function SocraticStationChat({
 [التلميذ المستهدف]:
 ${studentName} (ID: ${studentId})
 
-[1. الدستور العام للنشاط]:
+[التموضع الحالي للنشاط]:
+المسار الدراسي: ${courseName || 'غير محدد'}
+الوحدة التعليمية: ${moduleName || 'غير محدد'}
+النشاط الحالي (مهمتك الأساسية): ${activityTitle || 'غير محدد'}
+
+🛑 [قوانين صارمة جداً (Guardrails) - التزم بها حرفياً]:
+1. التركيز المطلق: دورك ينحصر *فقط* في شرح ومناقشة "النشاط الحالي". يُمنع القفز لدروس متقدمة.
+2. حظر الأكواد والأدوات (No JSON/Tools): أنت لا تملك أدوات خارجية. يُمنع منعاً باتاً كتابة أي أكواد برمجية، أو أوامر JSON (مثل action أو parameters). تواصل بنص طبيعي بشري فقط.
+3. المنهجية السقراطية: لا تعطِ الحلول المباشرة، وجه التلميذ بأسئلة متدرجة.
+
+====================
+[الدستور العام للنشاط (القوانين والمعارف)]:
 ${globalLatexSummary || activityDescription || activityTitle || "لا يوجد سياق عام محدد."}
+====================
 
-[2. المهمة الحالية (${hasStations ? `المحطة ${activeStationIndex + 1} من ${stationsList.length}` : "دروس ومفاهيم الدرس الشاملة"})]:
-العنوان: ${currentStation ? currentStation.title || `المحطة #${activeStationIndex + 1}` : activityTitle}
-الهدف: ${currentStation ? currentStation.content || "لا يوجد محتوى محدد." : activityDescription || activityTitle}
-المحتوى والمرفقات المتوفرة للتلميذ في هذه الصفحة:
-${attachments && attachments.length > 0 ? attachments.map((a: any) => `- ملف: ${a.title || a.name || "مرفق"} (نوع: ${a.type || "مستند"})`).join("\n") : "- لا توجد مرفقات حالياً."}
-
-[3. التوجيه السري للمحطة (AI Directives)]:
-${currentStation ? currentStation.aiDirectives || "لا يوجد توجيه سري للمعلم في هذه المحطة." : "لا يوجد محطات تفاعلية خاصة بهذا الدرس."}
-
-[4. العزل المخصص لهذا التلميذ]:
+[توجيهات سرية خاصة بهذا التلميذ]:
 - العزل العام للنشاط: ${currentGlobalIsoNote || "لا يوجد توجيه عام مخصص هذا التلميذ."}
 - عزل هذه المحطة: ${currentStationIsoNote || "لا يوجد توجيه مخصص لهذا التلميذ في هذه المحطة."}
 
-[5. عدد الرسائل السابقة في الذاكرة]:
+====================
+[المهمة الحالية (${hasStations ? `المحطة ${activeStationIndex + 1} من ${stationsList.length}` : "دروس ومفاهيم الدرس الشاملة"})]:
+العنوان: ${currentStation ? currentStation.title || `المحطة #${activeStationIndex + 1}` : activityTitle}
+نص التمرين (Challenge): ${currentStation ? currentStation.challenge || currentStation.content || "لا يوجد محتوى محدد." : activityDescription || activityTitle}${currentStation && currentStation.groundTruth ? `\nالحل النموذجي المعتمد (Ground Truth):\n${currentStation.groundTruth}` : ""}
+التوصيات البيداغوجية وقواعد التوجيه: ${currentStation ? currentStation.pedagogyRules || currentStation.aiDirectives || "لا يوجد توجيه سري للمعلم في هذه المحطة." : "لا يوجد محطات تفاعلية خاصة بهذا الدرس."}
+
+المحتوى والمرفقات المتوفرة للتلميذ في هذه الصفحة:
+${attachments && attachments.length > 0 ? attachments.map((a: any) => `- ملف: ${a.title || a.name || "مرفق"} (نوع: ${a.type || "مستند"})`).join("\n") : "- لا توجد مرفقات حالياً."}
+====================
+
+[عدد الرسائل السابقة في الذاكرة]:
 ${(stationChats[currentStationKey] || []).length} رسائل تفاعلية`}
             </div>
 

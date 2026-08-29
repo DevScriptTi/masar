@@ -6,41 +6,6 @@ import { getModuleById } from "@/src/lib/firebase/coursesService";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 
-// Resolve Space-Time Breadcrumbs Header (Requirement 2)
-async function resolveBreadcrumbsHeader(body: any, data: any): Promise<string> {
-  let courseTitle = body.courseTitle || body.courseName || (data && (data.courseTitle || data.courseName)) || "";
-  let moduleTitle = body.moduleTitle || body.moduleName || (data && (data.moduleTitle || data.moduleName)) || "";
-  let activityTitle = body.activityTitle || body.activityName || body.lessonContext || (data && (data.activityTitle || data.activityName || data.lessonContext)) || "";
-  let stationTitle = body.stationTitle || (body.currentStation && body.currentStation.title) || (data && (data.stationTitle || (data.currentStation && data.currentStation.title))) || "";
-
-  const courseId = body.courseId || (data && data.courseId);
-  const moduleId = body.moduleId || (data && data.moduleId);
-  const activityId = body.activityId || (data && data.activityId);
-
-  if ((!courseTitle && courseId) || (!moduleTitle && moduleId) || (!activityTitle && activityId)) {
-    try {
-      const [cSnap, mSnap, aSnap] = await Promise.all([
-        courseId ? getDoc(doc(db, "courses", courseId)) : Promise.resolve(null),
-        moduleId ? getDoc(doc(db, "modules", moduleId)) : Promise.resolve(null),
-        activityId ? getDoc(doc(db, "activities", activityId)) : Promise.resolve(null),
-      ]);
-
-      if (!courseTitle && cSnap && cSnap.exists()) courseTitle = cSnap.data().title || "";
-      if (!moduleTitle && mSnap && mSnap.exists()) moduleTitle = mSnap.data().title || "";
-      if (!activityTitle && aSnap && aSnap.exists()) activityTitle = aSnap.data().title || "";
-    } catch (err) {
-      console.warn("Breadcrumbs Firestore fetch error:", err);
-    }
-  }
-
-  const finalCourse = courseTitle.trim() || "مادة الرياضيات";
-  const finalModule = moduleTitle.trim() || "الوحدة التعلمية";
-  const finalActivity = activityTitle.trim() || "النشاط التعليمي";
-  const finalStation = stationTitle.trim() || "عام";
-
-  return `[التموضع الحالي للتلميذ]: مسار: ${finalCourse} > وحدة: ${finalModule} > نشاط: ${finalActivity} > محطة: ${finalStation}`;
-}
-
 // Resolve Student Cohort / Group IDs for Isolation (Requirement 3)
 async function resolveStudentCohortIds(studentId: string, providedCohortIds?: string[]): Promise<string[]> {
   if (Array.isArray(providedCohortIds) && providedCohortIds.length > 0) {
@@ -261,119 +226,104 @@ export async function POST(req: Request) {
       }
     }
 
-    // Strict System Prompt incorporating Pre-Analysis Cache, Master Profile, Generative UI, Socratic Pacing & Textbook Formatting
-    let systemPrompt = `أنت مساعد ذكي لسقراطي في منصة "مسار". التلميذ الذي تتحدث معه اسمه "${studentDisplayName}".
-
-القواعد الصارمة للرد:
-1. المناداة بالاسم: يجب أن تذكر اسم التلميذ (${studentDisplayName}) في ردودك دائماً لخلق ألفة وتشجيع.
-2. التقطيع السقراطي: لا تقم بتشخيص كل الصور أو الأخطاء دفعة واحدة. قدم ملاحظة واحدة فقط أو خطأ واحداً، ثم اسأل التلميذ سؤالاً تفاعلياً ليفكر فيه، وانتظر رده.
-3. التنسيق والأسلوب المدرسي الممتاز: استخدم عناوين Markdown (مثل ### الخطوة الأولى:) لتنظيم ردك كأنه كتاب مدرسي للرياضيات. قم بتظليل الكلمات المفتاحية بخط غامق (Bold). تأكد من وضع جميع المتغيرات والمعادلات الرياضية، حتى البسيطة منها مثل $x=0$ أو $x-1=0$، بين علامات $ لكي يتم تنسيقها بشكل صحيح باللون الأزرق المنهجي ومنع تفككها في اتجاه RTL.
-4. الإشارة للصور: عند الإشارة إلى صورة من صور التلميذ، استخدم هذا التنسيق الحرفي فقط: [الصورة X](#image-X) حيث X هو رقم الصورة (مثل #image-1 للصورة الأولى، #image-2 للصورة الثانية...). لا تضع أفكاراً أو روابط وهمية بديلة.
-5. الردود المقترحة (Smart Chips): في نهاية كل رد لك، يجب أن تقترح على التلميذ 2 أو 3 خيارات قصيرة وذكية للرد. اكتب كل خيار في سطر جديد بالصيغة التالية حصراً: [اقتراح: نص الرد المقترح هنا].
-6. التعامل مع أكواد LaTeX المرفقة: إذا احتوى المرجع أو رسالة المستخدم على كود LaTeX كامل (مستند بحزم وديباجة مثل \\documentclass أو \\usepackage أو tcolorbox)، قم باستخلاص المفاهيم الرياضية، التمارين والحلول النموذجية منه فقط. لا تقم أبداً بإرجاع أو طباعة أوامر الديباجة في ردودك للتلميذ.
-7. ميزة التدريبات التفاعلية (Generative UI) - [أولوية قصوى وشرط إجباري]:
-أنت تمتلك قدرة خارقة على توليد تمارين تفاعلية تظهر كبطاقات مرئية داخل الدردشة.
-عندما يطلب منك التلميذ تمريناً، أو عندما تختبر فهمه، يُمنع منعاً باتاً كتابة التمرين الرياضي كنص عادي.
-يجب عليك وجوباً توليد التمرين حصرياً باستخدام كتلة كود (Code Block) من نوع \`exercise\` تحتوي على كائن JSON دقيق.
-
-أنت تمتلك 3 قوالب تفاعلية (اختر الأنسب حسب السياق):
-
-1. قالب "جمع الكسور" (fraction_addition):
-استخدمه لاختبار توحيد المقامات أو جمعها.
-\`\`\`exercise
-{
-  "type": "fraction_addition",
-  "question": "\\\\frac{2}{7} + \\\\frac{3}{7}",
-  "denominator": 7,
-  "correctNumerator": 5
-}
-\`\`\`
-
-2. قالب "إيجاد المجهول" (equation_solving):
-استخدمه لاختبار حل المعادلات البسيطة (مثل المتراجحات المكتوبة كمعادلة، أو الضرب في المقلوب).
-\`\`\`exercise
-{
-  "type": "equation_solving",
-  "question": "2x - 4 = 10",
-  "variable": "x",
-  "correctAnswer": 7
-}
-\`\`\`
-
-3. قالب "خيارات متعددة" (multiple_choice):
-استخدمه لاختبار المفاهيم النظرية (مثل اتجاه المتراجحة، أو اختيار المجال الصحيح). الخيارات يمكن أن تحتوي على LaTeX.
-\`\`\`exercise
-{
-  "type": "multiple_choice",
-  "question": "عند ضرب طرفي المتراجحة $-2x > 4$ في العدد $-\\\\frac{1}{2}$، ماذا يحدث؟",
-  "options": [
-    "يظل اتجاه المتراجحة كما هو وتصبح $x > -2$",
-    "يتغير اتجاه المتراجحة وتصبح $x < -2$",
-    "تصبح معادلة $x = -2$"
-  ],
-  "correctIndex": 1
-}
-\`\`\`
-
-قواعد الإعدام البرمجي الصارمة (Strict Rules):
-1. إياك أن تكتب المعادلة المطلوبة من التلميذ حلها خارج كائن الـ JSON.
-2. يجب أن يكون الـ JSON صالحاً برمجياً.
-3. يمكنك كتابة سطر تشجيعي واحد فقط قبل الكتلة، مثلاً: "لنجرب حل هذا التمرين التفاعلي للتأكد من فهمك:" ثم تدرج كتلة الكود مباشرة.
-
-سياق الدرس الحالي: "${lessonContext || "الرياضيات"}"
-
---- بداية ملخص الدرس الرسمي ---
-${lessonSummary && String(lessonSummary).trim() ? lessonSummary : "محتوى وقوانين درس الرياضيات المعتمد."}
---- نهاية ملخص الدرس الرسمي ---`;
-
-    // Inject Master Profile (Cumulative Learning Memory) into System Prompt
-    if (
-      masterProfile &&
-      ((masterProfile.skillTags && Object.keys(masterProfile.skillTags).length > 0) ||
-        (masterProfile.commonMistakes && masterProfile.commonMistakes.length > 0) ||
-        masterProfile.preferredLearningStyle)
-    ) {
-      systemPrompt += `\n\n--- الذاكرة التراكمية للتلميذ (Master Profile) ---
-نقاط القوة والضعف (Skill Tags): ${JSON.stringify(masterProfile.skillTags || {})}
-الأخطاء الشائعة التي يقع فيها (Common Mistakes): ${JSON.stringify(masterProfile.commonMistakes || [])}
-${masterProfile.preferredLearningStyle ? `أسلوب التعلم المفضل: ${masterProfile.preferredLearningStyle}` : ""}
---- نهاية الذاكرة التراكمية ---
-استخدم هذه الذاكرة التراكمية لتوجيه التلميذ بشكل مخصص ومساعدته على تجاوز نقاط ضعفه وأخطائه المنهجية السابقة.`;
-    }
-
-    if (evalCacheStr) {
-      systemPrompt += `\n\n--- بداية الملخص والتقييم المسبق لإجابات التلميذ (AI Evaluation JSON) ---
-${evalCacheStr}
---- نهاية الملخص والتقييم المسبق ---
-لديك ملخص مسبق لإجابات التلميذ (JSON) استند إليه دائماً لسرعة الرد وإجابة التلميذ فوراً بدون الحاجة للصور.
-قاعدة استثنائية (Vision Fallback): إذا اعترض التلميذ صراحة على تقييمك، أو طلب مراجعة صورة محددة أو خطوة معينة، تجاهل الملخص مؤقتاً، واعتمد على الصور المرفقة في هذه المحادثة لقراءتها بصرياً بدقة وتصحيح الموقف.`;
-    }
-
-    if (aggregatedLatex) {
-      systemPrompt += `\n\n--- بداية المراجع وأكواد الـ LaTeX والحلول النموذجية المعتمدة للدرس ---
-${aggregatedLatex}
---- نهاية المراجع والحلول النموذجية المعتمدة ---
-هذه هي المراجع وأكواد الـ LaTeX الخاصة بالتمارين والحلول النموذجية المعتمدة لهذا الدرس. استخدمها حصرياً لمقارنة حلول التلميذ وتوجيهه سقراطياً واكتشاف أي خطأ منهجي أو حسابي في حله.`;
-    }
-
-    // Inject Hidden Teacher Directives if present (Dual-Layer Context Injection)
-    if (teacherDirectivesStr && teacherDirectivesStr.trim() !== "") {
-      systemPrompt += `\n\n### توجيهات سرية وخاصة من أستاذ المادة لهذا الدرس (يجب الالتزام بها حرفياً):\n${teacherDirectivesStr.trim()}`;
-    }
-
-    // Inject Vision Instructions ONLY if forceVision requested image attachment
-    if (shouldIncludeImages) {
-      systemPrompt += `\n\n8. صور حل التلميذ المرفقة: لقد طلب التلميذ مراجعة صور إجابته بصرياً المرفقة (${imagesPayload.length} صورة). عند الإشارة إلى أي صورة أو خطأ فيها، استخدم التنسيق الحرفي الحصري التالي فقط: [الصورة X](#image-X) حيث X هو رقم الصورة الحقيقي (من 1 إلى ${imagesPayload.length}).`;
-    }
-
     // Resolve Cohort/Group IDs for targetUserId (Requirement 3)
     const cohortIds = await resolveStudentCohortIds(
       targetUserId,
       body.cohortIds || body.groupIds || (data && (data.cohortIds || data.groupIds))
     );
 
-    // Resolve Space-Time Breadcrumbs Header (Requirement 2)
-    const breadcrumbsHeader = await resolveBreadcrumbsHeader(body, data);
+    // Deep Firestore Traversal: Activity -> Module -> Course
+    let courseTitle =
+      body.courseTitle ||
+      body.courseName ||
+      (body.course && (body.course.title || body.course.name)) ||
+      (data && (data.courseTitle || data.courseName || (data.course && (data.course.title || data.course.name)))) ||
+      "";
+
+    let moduleTitle =
+      body.moduleTitle ||
+      body.moduleName ||
+      body.sectionName ||
+      (body.module && (body.module.title || body.module.name)) ||
+      (data && (data.moduleTitle || data.moduleName || data.sectionName || (data.module && (data.module.title || data.module.name)))) ||
+      "";
+
+    let activityTitle =
+      body.activityTitle ||
+      body.activityName ||
+      body.title ||
+      body.lessonContext ||
+      (body.activity && (body.activity.title || body.activity.name)) ||
+      (data && (data.activityTitle || data.activityName || data.title || data.lessonContext || (data.activity && (data.activity.title || data.activity.name)))) ||
+      "";
+
+    let courseIndexContext =
+      body.courseIndexContext ||
+      body.indexContext ||
+      body.courseSyllabus ||
+      (body.course && (body.course.courseIndexContext || body.course.indexContext)) ||
+      (data && (data.courseIndexContext || data.indexContext || data.courseSyllabus || (data.course && (data.course.courseIndexContext || data.course.indexContext)))) ||
+      "";
+
+    let activityGlobalContext =
+      body.globalContext ||
+      body.globalLatexSummary ||
+      lessonSummary ||
+      (body.activity && (body.activity.globalContext || body.activity.globalLatexSummary || body.activity.description)) ||
+      (data && (data.globalContext || data.globalLatexSummary || data.lessonSummary)) ||
+      "";
+
+    let courseId = body.courseId || (data && data.courseId);
+    let resolvedModuleId = moduleId || body.sectionId || (data && (data.moduleId || data.sectionId));
+    const activityId = body.activityId || (data && data.activityId);
+
+    try {
+      if (activityId) {
+        const aSnap = await getDoc(doc(db, "activities", activityId));
+        if (aSnap.exists()) {
+          const actData = aSnap.data();
+          if (!activityTitle) activityTitle = actData.title || actData.name || "";
+          if (!activityGlobalContext) {
+            activityGlobalContext = actData.globalContext || actData.globalLatexSummary || actData.description || "";
+          }
+          if (!resolvedModuleId) resolvedModuleId = actData.moduleId || actData.sectionId;
+          if (!courseId) courseId = actData.courseId;
+        }
+      }
+
+      if (resolvedModuleId) {
+        const mSnap = await getDoc(doc(db, "modules", resolvedModuleId));
+        if (mSnap.exists()) {
+          const mData = mSnap.data();
+          if (!moduleTitle) moduleTitle = mData.title || mData.name || "";
+          if (!courseId) courseId = mData.courseId;
+        }
+      }
+
+      if (courseId) {
+        const cSnap = await getDoc(doc(db, "courses", courseId));
+        if (cSnap.exists()) {
+          const cData = cSnap.data();
+          if (!courseTitle) courseTitle = cData.title || cData.name || "";
+          if (!courseIndexContext) {
+            courseIndexContext =
+              cData.courseIndexContext ||
+              cData.indexContext ||
+              cData.syllabus ||
+              cData.syllabusContext ||
+              "";
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn("Spatio-Temporal & Course Syllabus Breadcrumbs Firestore fetch error:", err);
+    }
+
+    const finalCourseTitle = courseTitle.trim() || "المادة الحالية";
+    const finalModuleTitle = moduleTitle.trim() || "غير محدد";
+    const finalActivityTitle = activityTitle.trim() || "غير محدد";
+    const finalCourseIndex = courseIndexContext.trim() || "لا يوجد فهرس متاح.";
+    const finalActivityGlobalContext = (activityGlobalContext && String(activityGlobalContext).trim()) || aggregatedLatex || "لا توجد قوانين مدخلة.";
 
     // Station Mode Check & System Log Injection
     const isStationChat = Boolean(
@@ -382,6 +332,49 @@ ${aggregatedLatex}
       body.currentStation ||
       (data && (data.isStationMode || data.stationMode || data.currentStation))
     );
+
+    const stationData =
+      body.currentStation ||
+      (data && data.currentStation) || {
+        title: body.stationTitle || "المحطة الحالية",
+        challenge: body.stationChallenge || body.stationContent || "حل المطلوب وتزويد المساعد بإجابتك",
+        content: body.stationChallenge || body.stationContent || "حل المطلوب وتزويد المساعد بإجابتك",
+        groundTruth: body.stationGroundTruth || "",
+        pedagogyRules: body.stationPedagogyRules || body.stationAiDirectives || teacherDirectivesStr || "",
+        aiDirectives: body.stationPedagogyRules || body.stationAiDirectives || teacherDirectivesStr || "",
+        customIsolations: body.stationCustomIsolations || [],
+      };
+
+    // Deep Isolation Directives Resolution
+    const rawGlobalIsolations =
+      body.globalCustomIsolations ||
+      body.isolationRules ||
+      (body.activity && body.activity.globalCustomIsolations) ||
+      (data && (data.globalCustomIsolations || data.isolationRules || (data.activity && data.activity.globalCustomIsolations))) ||
+      [];
+
+    const rawStationIsolations =
+      stationData.customIsolations ||
+      body.stationCustomIsolations ||
+      (data && (data.stationCustomIsolations || (data.currentStation && data.currentStation.customIsolations))) ||
+      [];
+
+    const combinedIsolationRules = [
+      ...(Array.isArray(rawGlobalIsolations) ? rawGlobalIsolations : []),
+      ...(isStationChat && Array.isArray(rawStationIsolations) ? rawStationIsolations : []),
+    ];
+
+    const resolvedDirectives = resolveIsolationDirectives(combinedIsolationRules, targetUserId, cohortIds);
+
+    if (resolvedDirectives.length === 0) {
+      if (body.globalIsolationNote) resolvedDirectives.push(body.globalIsolationNote);
+      if (isStationChat && body.stationIsolationNote) resolvedDirectives.push(body.stationIsolationNote);
+    }
+
+    const formattedIsolationRules =
+      resolvedDirectives.length > 0
+        ? resolvedDirectives.map((d) => `- ${d}`).join("\n")
+        : "لا توجد توجيهات خاصة.";
 
     // Extract attachments metadata payload Requirement 3
     const attachmentsPayload: any[] =
@@ -404,114 +397,85 @@ ${aggregatedLatex}
         .join("\n");
     }
 
+    // STRICT MULTI-SUBJECT SYSTEM PROMPT TEMPLATE (Guardrails & Anti-Hallucination)
+    let strictSystemPrompt = `أنت مساعد تعليمي ذكي وداعم (Socratic AI Tutor) متخصص في مادة (${finalCourseTitle}).
+مهمتك هي مرافقة التلميذ (${studentDisplayName}) خطوة بخطوة للتمكن من المفاهيم.
+
+[التموضع الحالي للنشاط]:
+المسار الدراسي: ${finalCourseTitle}
+الوحدة التعليمية: ${finalModuleTitle}
+النشاط الحالي (مهمتك الأساسية): ${finalActivityTitle}
+
+🛑 [قوانين صارمة جداً (Guardrails) - التزم بها حرفياً]:
+1. التركيز المطلق: دورك ينحصر *فقط* في شرح ومناقشة "النشاط الحالي". يُمنع القفز لدروس متقدمة.
+2. حظر الأكواد والأدوات (No JSON/Tools): أنت لا تملك أدوات خارجية. يُمنع منعاً باتاً كتابة أي أكواد برمجية، أو أوامر JSON (مثل action أو parameters). تواصل بنص طبيعي بشري فقط.
+3. المنهجية السقراطية: لا تعطِ الحلول المباشرة، وجه التلميذ بأسئلة متدرجة.
+
+====================
+[الدستور العام للنشاط (القوانين والمعارف)]:
+${finalActivityGlobalContext}
+====================
+
+[توجيهات سرية خاصة بهذا التلميذ]:
+${formattedIsolationRules}`;
+
+    // Station Task & Attachments (If Station Mode)
     if (isStationChat) {
-      const actGlobalContext =
-        body.globalContext ||
-        body.globalLatexSummary ||
-        (body.activity && (body.activity.globalContext || body.activity.globalLatexSummary)) ||
-        (data && (data.globalContext || data.globalLatexSummary)) ||
-        lessonSummary ||
-        "لا يوجد سياق عام محدد.";
+      const stationChallengeText = stationData.challenge || stationData.content || "حل المطلوب وتزويد المساعد بإجابتك";
+      const stationGroundTruthText = stationData.groundTruth ? `\n\nالحل النموذجي المعتمد (Ground Truth - للتقييم الداخلي فقط ومقارنة الحلول):\n${stationData.groundTruth}` : "";
+      const stationPedagogyText = stationData.pedagogyRules || stationData.aiDirectives || "لا يوجد.";
 
-      const stationData =
-        body.currentStation ||
-        (data && data.currentStation) || {
-          title: body.stationTitle || "المحطة الحالية",
-          content: body.stationContent || "حل التمرين المطلوب",
-          aiDirectives: body.stationAiDirectives || teacherDirectivesStr || "",
-          customIsolations: body.stationCustomIsolations || [],
-        };
-
-      // Backend-Resolved Deep Isolation Filtering (Requirement 3)
-      const rawGlobalIsolations =
-        body.globalCustomIsolations ||
-        body.isolationRules ||
-        (body.activity && body.activity.globalCustomIsolations) ||
-        (data && (data.globalCustomIsolations || data.isolationRules || (data.activity && data.activity.globalCustomIsolations))) ||
-        [];
-
-      const rawStationIsolations =
-        stationData.customIsolations ||
-        body.stationCustomIsolations ||
-        (data && (data.stationCustomIsolations || (data.currentStation && data.currentStation.customIsolations))) ||
-        [];
-
-      const combinedIsolationRules = [
-        ...(Array.isArray(rawGlobalIsolations) ? rawGlobalIsolations : []),
-        ...(Array.isArray(rawStationIsolations) ? rawStationIsolations : []),
-      ];
-
-      const resolvedDirectives = resolveIsolationDirectives(combinedIsolationRules, targetUserId, cohortIds);
-
-      // Also check fallback single-note strings if no rules array matched
-      if (resolvedDirectives.length === 0) {
-        if (body.globalIsolationNote) resolvedDirectives.push(body.globalIsolationNote);
-        if (body.stationIsolationNote) resolvedDirectives.push(body.stationIsolationNote);
-      }
-
-      const isolationSection =
-        resolvedDirectives.length > 0
-          ? `[العزل المخصص لهذا التلميذ]:\n${resolvedDirectives.map((d) => `- ${d}`).join("\n")}`
-          : `[العزل المخصص لهذا التلميذ]: لا توجد توجيهات مخصصة لهذا التلميذ.`;
-
-      systemPrompt = `
-${breadcrumbsHeader}
-
-[SYSTEM LOG - INITIALIZATION]
-أنت "وكيل المحطات السقراطي" التابع للأستاذ فوزي. التلميذ الذي أمامك هو: ${studentDisplayName}.
-
---- إعدادات النشاط العام ---
-${actGlobalContext}
-
---- [العزل المخصص لهذا التلميذ] ---
-${isolationSection}
-
-[2. المهمة الحالية (${stationData.title || "المحطة الحالية"})]:
+      strictSystemPrompt += `\n\n====================
+[المهمة الحالية (${stationData.title || "المحطة الحالية"})]:
 العنوان: ${stationData.title || "المحطة الحالية"}
-الهدف: ${stationData.content || "حل المطلوب وتزويد المساعد بإجابتك"}
-التوجيه السري للمعلم: ${stationData.aiDirectives || "لا يوجد."}
+نص التمرين (Challenge): ${stationChallengeText}${stationGroundTruthText}
+التوصيات البيداغوجية وقواعد التوجيه (Pedagogy Guardrails): ${stationPedagogyText}
 
 المحتوى والمرفقات المتوفرة للتلميذ في هذه الصفحة:
 ${formattedAttachmentsMetadata}
 
-توجيه خاص للمرفقات: أنت تعلم ما هي المرفقات الموجودة في الصفحة من خلال السياق أعلاه. لا تخترع مرفقات غير موجودة، وأرشد التلميذ لفتحها إذا سأل عنها.
-
-[RULES]
-1. لا تقدم الحلول الجاهزة أبداً.
-2. قيّم أي صورة يرسلها التلميذ بناءً على التوجيه السري للمحطة حصراً.
-3. لا تنتقل لطلب مهام المحطة التالية؛ ركز فقط على المحطة الحالية.
-4. إياك واستخدام روابط Markdown للصور مثل [الصورة](#image-1). أشار للصور بالحديث عنها طبيعياً في النص (مثال: 'في محاولتك المرفقة').
-5. إذا أردت اختبار التلميذ بسؤال أو تمرين، اطرح السؤال طبيعياً بنص عادي وبسيط دون استخدام أكواد JSON أو كتل كود.
-`.trim();
-    } else {
-      // Non-station mode: prepend breadcrumbs and resolved isolation directives to system prompt
-      const rawGlobalIsolations =
-        body.globalCustomIsolations ||
-        body.isolationRules ||
-        (body.activity && body.activity.globalCustomIsolations) ||
-        (data && (data.globalCustomIsolations || data.isolationRules)) ||
-        [];
-
-      const resolvedDirectives = resolveIsolationDirectives(rawGlobalIsolations, targetUserId, cohortIds);
-      const isolationSection =
-        resolvedDirectives.length > 0
-          ? `[العزل المخصص لهذا التلميذ]:\n${resolvedDirectives.map((d) => `- ${d}`).join("\n")}`
-          : `[العزل المخصص لهذا التلميذ]: لا توجد توجيهات مخصصة لهذا التلميذ.`;
-
-      systemPrompt = `${breadcrumbsHeader}\n\n${isolationSection}\n\n${systemPrompt}`;
+قواعد المحطة:
+1. قيّم أي إجابة أو صورة يرسلها التلميذ بناءً على التوجيه السري والحل النموذجي للمحطة الحالية حصراً.
+2. لا تنتقل لطلب مهام المحطة التالية؛ ركز فقط على المحطة الحالية.
+====================`;
     }
 
+    // Pre-Analysis Evaluation Cache Injection
+    if (evalCacheStr) {
+      strictSystemPrompt += `\n\n--- بداية الملخص والتقييم المسبق لإجابات التلميذ (AI Evaluation JSON) ---
+${evalCacheStr}
+--- نهاية الملخص والتقييم المسبق ---
+لديك ملخص مسبق لإجابات التلميذ (JSON) استند إليه دائماً لسرعة الرد وإجابة التلميذ فوراً بدون الحاجة للصور.
+قاعدة استثنائية (Vision Fallback): إذا اعترض التلميذ صراحة على تقييمك، أو طلب مراجعة صورة محددة أو خطوة معينة، تجاهل الملخص مؤقتاً، واعتمد على الصور المرفقة في هذه المحادثة لقراءتها بصرياً بدقة وتصحيح الموقف.`;
+    }
+
+    // Model LaTeX Solutions & References
+    if (aggregatedLatex && !finalActivityGlobalContext.includes(aggregatedLatex)) {
+      strictSystemPrompt += `\n\n--- بداية المراجع وأكواد الـ LaTeX والحلول النموذجية المعتمدة للنشاط ---
+${aggregatedLatex}
+--- نهاية المراجع والحلول النموذجية المعتمدة ---`;
+    }
+
+    // Teacher Directives
+    if (teacherDirectivesStr && teacherDirectivesStr.trim() !== "") {
+      strictSystemPrompt += `\n\n### توجيهات إضافية وسرية من أستاذ المادة لهذا النشاط:\n${teacherDirectivesStr.trim()}`;
+    }
+
+    // Technical Formatting Directives
     const technicalDirectives = `
 === توجيهات تنسيقية تقنية صارمة (يجب الالتزام بها حرفياً) ===
-1. **تنسيق النهايات (Limits):** عند كتابة أي نهاية رياضية، يُمنع منعاً باتاً استخدام الصيغة المختصرة \\lim_{x \\to a}. يجب عليك دائماً وحصرياً استخدام الصيغة: \\lim\\limits_{x \\to a} لضمان ظهورها بشكل سليم في الواجهة.
+1. **تنسيق النهايات والمعادلات:** تأكد من وضع جميع الرموز والمعادلات الرياضية بين $ للمعادلات المضمنة و $$ للكتل. عند كتابة أي نهاية رياضية استخدم الصيغة: \\lim\\limits_{x \\to a}.
 2. **الإشارة للصور المرفقة:** التلميذ أرفق صوراً لحله. عندما تشير إلى هذه الصور في ردك، استخدم كلمات عادية مثل "في صورتك الأولى" أو "في الحل المرفق". يُمنع منعاً باتاً استخدام أي روابط ماركداون (Markdown Links) للصور مثل [الصورة 1](#) أو محاولة تضمين رابط الصورة. فقط أشر إليها نصياً.
 `.trim();
 
-    systemPrompt += `\n\n${technicalDirectives}`;
+    strictSystemPrompt += `\n\n${technicalDirectives}`;
 
-    // Backend Audit Logger: Print exact assembled System Prompt to server terminal
+    const finalSystemPrompt = strictSystemPrompt;
+
+    // Debugging Log (Requirement 4)
+    console.log("FINAL SYSTEM PROMPT HEADER:", finalSystemPrompt.substring(0, 300));
     console.log("\n========== [SYSTEM PROMPT DEBUG START] ==========");
-    console.log(systemPrompt);
+    console.log(finalSystemPrompt);
     console.log("========== [SYSTEM PROMPT DEBUG END] ==========\n");
 
     // Reference Images Injection (Teacher's Official Reference Diagrams / Graphs)
@@ -577,51 +541,11 @@ ${formattedAttachmentsMetadata}
       }
     }
 
-    // Dynamic Tool Definition: getModuleSyllabus
-    const chatTools = {
-      getModuleSyllabus: tool({
-        description:
-          "استخدم هذه الأداة حصرياً عندما يسأل التلميذ سؤالاً شمولياً يتطلب منك مراجعة التدرج السنوي الوزاري أو القوانين التفصيلية للوحدة الحالية.",
-        inputSchema: z.object({
-          reason: z.string().describe("سبب استدعاء أداة جلب محتوى الوحدة بالتفصيل"),
-        }),
-        execute: async ({ reason }) => {
-          console.log(
-            "🛠️ AI Executing getModuleSyllabus tool... Reason:",
-            reason,
-            "targetModuleId:",
-            targetModuleId
-          );
-          if (!targetModuleId) {
-            return "لا توجد وحدة محددة حالياً في سياق الجلسة.";
-          }
-
-          try {
-            const moduleDoc = await getModuleById(targetModuleId);
-            if (
-              !moduleDoc ||
-              !moduleDoc.moduleDetailedLatex ||
-              !moduleDoc.moduleDetailedLatex.trim()
-            ) {
-              return "لا يوجد محتوى تفصيلي إضافي مدون لهذه الوحدة في قاعدة البيانات.";
-            }
-
-            return `--- بداية التدرج السنوي والقوانين التفصيلية للوحدة ---
-${moduleDoc.moduleDetailedLatex.trim()}
---- نهاية القوانين التفصيلية للوحدة ---`;
-          } catch (err: any) {
-            console.error("Error executing getModuleSyllabus tool:", err);
-            return "حدث خطأ أثناء جلب محتوى الوحدة من قاعدة البيانات.";
-          }
-        },
-      }),
-    };
-
     // Primary Model -> Working Model (gemini-3.1-flash-lite)
     let result;
     let finalModelUsed = "gemini-3.1-flash-lite";
 
-    console.log("==== DEBUG STAGE 2: System Prompt Tail ====", systemPrompt.slice(-250));
+    console.log("==== DEBUG STAGE 2: System Prompt Tail ====", finalSystemPrompt.slice(-250));
 
     try {
       console.log(
@@ -629,10 +553,8 @@ ${moduleDoc.moduleDetailedLatex.trim()}
       );
       result = await streamText({
         model: customGoogle(finalModelUsed),
-        system: systemPrompt,
+        system: finalSystemPrompt,
         messages: promptMessages,
-        tools: chatTools,
-        stopWhen: stepCountIs(5),
       });
     } catch (primaryError: any) {
       console.error(

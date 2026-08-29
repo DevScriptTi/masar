@@ -28,9 +28,21 @@ import {
   Users,
   Check,
   Bot,
+  Maximize2,
+  Eye,
+  Edit3,
 } from "lucide-react";
 import { useToast } from "@/src/components/ui/use-toast";
 import { InlineAIRefiner } from "@/src/components/admin/activities/InlineAIRefiner";
+import { RichTextEditor } from "@/src/components/admin/RichTextEditor";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/src/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogTrigger,
@@ -61,6 +73,11 @@ export default function CoursesPage() {
   const [courseDetailedLatex, setCourseDetailedLatex] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Layered Focus Modals & Preview Tab States
+  const [indexViewMode, setIndexViewMode] = useState<"edit" | "preview">("edit");
+  const [isTextBuilderOpen, setIsTextBuilderOpen] = useState(false);
+  const [isMathBuilderOpen, setIsMathBuilderOpen] = useState(false);
 
   const handleCurriculumCoPilot = () => {
     const template = `الكفاءة المستهدفة:
@@ -363,7 +380,7 @@ export default function CoursesPage() {
                 />
               </div>
 
-              {/* Course Description with Curriculum Co-Pilot (Requirement 4) */}
+              {/* Course Description with Layer 3 Rich Text Focus Modal */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-semibold text-on-surface-variant">
@@ -371,18 +388,19 @@ export default function CoursesPage() {
                   </label>
                   <button
                     type="button"
-                    onClick={handleCurriculumCoPilot}
-                    className="px-2 py-1 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-extrabold text-[11px] transition-all flex items-center gap-1 cursor-pointer shadow-2xs active:scale-95"
+                    onClick={() => setIsTextBuilderOpen(true)}
+                    className="px-2.5 py-1 rounded-lg bg-surface-variant/50 hover:bg-surface-variant text-on-surface-variant hover:text-primary text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-outline/20 shadow-2xs"
+                    title="فتح محرر النصوص المتقدم"
                   >
-                    <Bot className="w-3.5 h-3.5 text-amber-300" />
-                    <span>🤖 هيكلة المقرر (AI)</span>
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    <span>محرر متقدم (Rich Text)</span>
                   </button>
                 </div>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={4}
-                  placeholder="اكتب نبذة مختصرة عن محتوى الدورة والفئة المستهدفة أو انقر زر هيكلة المقرر..."
+                  placeholder="اكتب نبذة مختصرة عن محتوى الدورة والفئة المستهدفة..."
                   disabled={isSubmitting}
                   className="w-full p-4 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs sm:text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all resize-y font-medium"
                 />
@@ -445,71 +463,89 @@ export default function CoursesPage() {
                   </h3>
                 </div>
 
-                {/* Field 1: The Permanent Index */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-on-surface-variant">
-                    الفهرس المختصر (سياق دائم)
-                  </label>
-                  <textarea
-                    value={courseIndexContext}
-                    onChange={(e) => setCourseIndexContext(e.target.value)}
-                    rows={3}
-                    placeholder="اكتب رؤوس أقلام الفهرس وسياق المنهج المختصر..."
-                    disabled={isSubmitting}
-                    className="w-full p-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs sm:text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all resize-none"
-                  />
-                  <InlineAIRefiner
-                    currentText={courseIndexContext}
-                    onRefined={(newText) => setCourseIndexContext(newText)}
-                  />
+                {/* Field 1: The Permanent Index with Edit/Preview Tabs & Layer 4 Math Focus Modal */}
+                <div className="space-y-2">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="block text-xs font-semibold text-on-surface-variant">
+                        الفهرس المختصر (سياق دائم)
+                      </label>
+
+                      {/* Edit / Preview Tabs */}
+                      <div className="inline-flex p-0.5 rounded-xl bg-surface-variant/40 border border-outline/20">
+                        <button
+                          type="button"
+                          onClick={() => setIndexViewMode("edit")}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                            indexViewMode === "edit"
+                              ? "bg-surface text-primary shadow-xs"
+                              : "text-on-surface-variant/70 hover:text-on-surface"
+                          }`}
+                        >
+                          ✏️ وضع التعديل (Edit)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIndexViewMode("preview")}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                            indexViewMode === "preview"
+                              ? "bg-surface text-primary shadow-xs"
+                              : "text-on-surface-variant/70 hover:text-on-surface"
+                          }`}
+                        >
+                          👁️ معاينة السياق (Preview)
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsMathBuilderOpen(true)}
+                      className="px-2.5 py-1 rounded-lg bg-surface-variant/50 hover:bg-surface-variant text-on-surface-variant hover:text-primary text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-outline/20 shadow-2xs shrink-0"
+                      title="فتح محرر LaTeX المتطور المنقسم"
+                    >
+                      <Maximize2 className="w-3.5 h-3.5" />
+                      <span>محرر رياضي متقدم (Math/LaTeX)</span>
+                    </button>
+                  </div>
+
+                  {indexViewMode === "edit" ? (
+                    <>
+                      <textarea
+                        value={courseIndexContext}
+                        onChange={(e) => setCourseIndexContext(e.target.value)}
+                        rows={3}
+                        placeholder="اكتب رؤوس أقلام الفهرس وسياق المنهج المختصر..."
+                        disabled={isSubmitting}
+                        className="w-full p-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs sm:text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all resize-none font-medium"
+                      />
+                      <InlineAIRefiner
+                        currentText={courseIndexContext}
+                        onRefined={(newText) => setCourseIndexContext(newText)}
+                      />
+                    </>
+                  ) : (
+                    <div className="p-4 rounded-xl bg-muted/40 border border-outline/20 text-on-surface min-h-[100px] max-h-60 overflow-y-auto shadow-inner space-y-2" dir="rtl">
+                      {courseIndexContext.trim() ? (
+                        <div className="prose dark:prose-invert max-w-none text-right text-xs sm:text-sm leading-relaxed">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkMath]}
+                            rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+                          >
+                            {courseIndexContext}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="text-center py-6 text-on-surface-variant/60 font-medium text-xs">
+                          لا يوجد سياق مكتوب للمعاينة بعد. قم بالتحويل إلى "وضع التعديل" لكتابة الفهرس أو استخدام المساعد الذكي.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-on-surface-variant/70">
                     اكتب رؤوس أقلام فقط. هذا النص سيرافق التلميذ دائماً في هذا المسار.
                   </p>
-                </div>
-
-                {/* Field 2: The Detailed Content (LaTeX) */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-on-surface-variant">
-                    المحتوى التفصيلي (للاستدعاء عند الحاجة)
-                  </label>
-                  <textarea
-                    value={courseDetailedLatex}
-                    onChange={(e) => setCourseDetailedLatex(e.target.value)}
-                    rows={5}
-                    placeholder="اكتب محتوى المسار بالتفصيل باستخدام أكواد LaTeX..."
-                    disabled={isSubmitting}
-                    dir="ltr"
-                    className="w-full p-3.5 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface text-left font-mono text-xs focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all resize-y"
-                  />
-                  <p className="text-[11px] text-on-surface-variant/70">
-                    اكتب محتوى المسار بالتفصيل باستخدام أكواد LaTeX. لن يراه الذكاء الاصطناعي إلا إذا استدعى أداة البحث.
-                  </p>
-
-                  {/* Live Preview Box */}
-                  {courseDetailedLatex.trim() && (
-                    <div className="mt-3 p-4 rounded-2xl bg-surface border border-primary/20 shadow-xs space-y-2">
-                      <div className="flex items-center justify-between border-b border-outline/10 pb-1.5">
-                        <span className="text-[11px] font-extrabold text-primary flex items-center gap-1.5">
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span>معاينة حية للرموز الرياضية (Live Preview)</span>
-                        </span>
-                        <span className="text-[9px] font-bold text-on-surface-variant">
-                          مكتبة KaTeX المباشرة
-                        </span>
-                      </div>
-                      <div className="text-xs text-on-surface leading-relaxed max-h-48 overflow-y-auto p-2 bg-surface-variant/20 rounded-xl" dir="rtl">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkMath]}
-                          rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
-                          components={{
-                            p: ({ children }) => <p className="my-1">{children}</p>,
-                          }}
-                        >
-                          {courseDetailedLatex}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -542,6 +578,115 @@ export default function CoursesPage() {
           </div>
         </div>
       )}
+
+      {/* Layer 3: Text Builder Focus Modal (Rich Text Editor) */}
+      <Dialog open={isTextBuilderOpen} onOpenChange={setIsTextBuilderOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base">
+              <Edit3 className="w-4 h-4 text-primary" />
+              <span>محرر النص المتقدم لوصف الدورة (Layer 3 Rich Text Builder)</span>
+            </DialogTitle>
+            <DialogDescription>
+              تعديل وتنسيق الوصف العام للدورة باستخدام المحرر الغني (Rich Text Editor) للتحكم في العناوين والفقرات والقوائم.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 min-h-[300px] overflow-y-auto py-2">
+            <RichTextEditor
+              value={description}
+              onChange={(newVal) => setDescription(newVal)}
+              placeholder="اكتب وصفاً شاملاً وتفصيلياً عن محتوى الدورة والفئة المستهدفة..."
+            />
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setIsTextBuilderOpen(false)}
+              className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-bold text-xs hover:bg-primary/90 transition-all shadow-xs cursor-pointer"
+            >
+              اعتماد وإغلاق
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Layer 4: Math/LaTeX Split-Screen Focus Modal */}
+      <Dialog open={isMathBuilderOpen} onOpenChange={setIsMathBuilderOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <span>محرر الفهرس والسياق الرياضي المتطور (Layer 4 Math/LaTeX Focus Builder)</span>
+            </DialogTitle>
+            <DialogDescription>
+              محرر شاشة منقسمة (Split-Screen) لكتابة وتنسيق كود LaTeX وسياق المنهج مع معاينة KaTeX فورية ومباشرة.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-[380px] max-h-[500px] overflow-hidden py-2" dir="rtl">
+            {/* Right Column: LaTeX / Markdown Editor */}
+            <div className="flex flex-col space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-on-surface flex items-center gap-1.5">
+                  <Edit className="w-3.5 h-3.5 text-primary" />
+                  <span>محرر الكود الرياضي والنصوص</span>
+                </span>
+                <span className="text-[10px] text-on-surface-variant/70 font-mono">Markdown + LaTeX</span>
+              </div>
+              <textarea
+                value={courseIndexContext}
+                onChange={(e) => setCourseIndexContext(e.target.value)}
+                placeholder="اكتب القوانين والرموز الرياضية مع استخدام $ للمعادلات المضمنة و $$ للكتل..."
+                className="flex-1 w-full p-3.5 rounded-2xl bg-surface-variant/40 border border-outline/30 text-on-surface text-right text-xs font-mono focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all resize-none leading-relaxed"
+              />
+              <InlineAIRefiner
+                currentText={courseIndexContext}
+                onRefined={(newText) => setCourseIndexContext(newText)}
+              />
+            </div>
+
+            {/* Left Column: Live KaTeX Preview */}
+            <div className="flex flex-col space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-on-surface flex items-center gap-1.5">
+                  <Eye className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>المعاينة المباشرة (Live KaTeX Preview)</span>
+                </span>
+                <span className="text-[10px] text-indigo-500 font-bold bg-indigo-500/10 px-2 py-0.5 rounded-md">Live KaTeX</span>
+              </div>
+              <div className="flex-1 w-full p-4 rounded-2xl bg-muted/40 border border-outline/20 overflow-y-auto shadow-inner text-xs sm:text-sm leading-relaxed" dir="rtl">
+                {courseIndexContext.trim() ? (
+                  <div className="prose dark:prose-invert max-w-none text-right text-xs sm:text-sm">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkMath]}
+                      rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+                    >
+                      {courseIndexContext}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-on-surface-variant/50 text-center py-12 space-y-2">
+                    <Sparkles className="w-6 h-6 text-primary/30" />
+                    <p className="text-xs">المعاينة الحية ستظهر هنا أثناء كتابة كود LaTeX أو نصوص Markdown في الطرف المقابل.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setIsMathBuilderOpen(false)}
+              className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-bold text-xs hover:bg-primary/90 transition-all shadow-xs cursor-pointer"
+            >
+              اعتماد وإغلاق
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

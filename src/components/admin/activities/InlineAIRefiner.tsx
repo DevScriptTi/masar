@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { Sparkles, Loader2 } from "lucide-react";
 import { useToast } from "@/src/components/ui/use-toast";
+import { generateContextAction, refineContextAction } from "@/actions/ai.actions";
 
 interface InlineAIRefinerProps {
   currentText: string;
@@ -24,36 +25,37 @@ export function InlineAIRefiner({
 
     setIsRefining(true);
     try {
-      const res = await fetch("/api/ai/refine-context", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentContextText: currentText || "",
-          refinementPrompt: refinementPrompt.trim(),
-        }),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || "فشل في تحسين السياق من الذكاء الاصطناعي");
+      let result;
+      if (!currentText || !currentText.trim()) {
+        result = await generateContextAction("Course Syllabus", refinementPrompt.trim(), []);
+      } else {
+        result = await refineContextAction(currentText.trim(), refinementPrompt.trim());
       }
 
-      const data = await res.json();
-      if (data.refinedText) {
-        onRefined(data.refinedText);
+      if (result.success && result.markdown) {
+        onRefined(result.markdown);
         setRefinementPrompt("");
         toast({
           title: "تم تحديث السياق بنجاح ✨",
-          description: "تمت إعادة صياغة السياق وفقاً لتوجيهاتك.",
+          description: "تمت صياغة السياق الرياضي وفقاً لتوجيهاتك.",
         });
       } else {
-        throw new Error(data.error || "استجابة غير صالحة من النموذج");
+        throw new Error(result.error || "استجابة غير صالحة من النموذج");
       }
     } catch (err: any) {
       console.error("Error refining context:", err);
+      const errorMessage = err?.message || "";
+      const is503 =
+        errorMessage.includes("503") ||
+        errorMessage.includes("high demand") ||
+        errorMessage.includes("Service Unavailable") ||
+        errorMessage.includes("overloaded");
+
       toast({
-        title: "خطأ أثناء تحسين السياق",
-        description: err.message || "تعذر الاتصال بخدمة الذكاء الاصطناعي.",
+        title: is503 ? "الخوادم مزدحمة حالياً 🚦" : "خطأ أثناء تحسين السياق",
+        description: is503
+          ? "يوجد ضغط عالٍ على خوادم الذكاء الاصطناعي في هذه اللحظة. يرجى المحاولة مرة أخرى بعد دقيقة."
+          : errorMessage || "تعذر الاتصال بخدمة الذكاء الاصطناعي.",
         variant: "destructive",
       });
     } finally {
