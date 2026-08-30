@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, use } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import {
   getCourseById,
@@ -20,6 +20,8 @@ import { formatPdfEmbedUrl, formatYouTubeUrl } from "@/src/lib/utils/formatters"
 import { ThemeToggle } from "@/src/components/ThemeToggle";
 import { NotificationBell } from "@/src/components/student/NotificationBell";
 import { AITutorWidget } from "@/src/components/student/AITutorWidget";
+import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from "@/src/components/ui/sheet";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/src/components/ui/accordion";
 import {
   ChevronLeft,
   BookOpen,
@@ -58,6 +60,9 @@ export default function StudentCoursePlayerPage({
   const courseId = resolvedParams.courseId;
   const routeActivityId = resolvedParams.activityId;
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const urlActivityId = searchParams.get("activityId") || routeActivityId;
 
   const { user, userData, loading: authLoading } = useAuth();
 
@@ -78,8 +83,9 @@ export default function StudentCoursePlayerPage({
   const [activeAttachment, setActiveAttachment] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Task C: Mobile Sidebar Toggle Drawer State
+  // Task C: Mobile Sidebar Toggle Drawer / Sheet State
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
 
   // Student Homework Submission details for AI Tutor Context & Chat History Persistence
   const [currentSubmissionId, setCurrentSubmissionId] = useState<string | undefined>(undefined);
@@ -296,15 +302,32 @@ export default function StudentCoursePlayerPage({
         setModules(visibleModules);
         setActivities(visibleActivities);
 
-        // Expand all module accordions by default
-        const moduleIds = visibleModules.map((m) => m.id!).filter(Boolean);
-        setExpandedModuleIds(moduleIds);
-
-        // Auto-select requested route activity or first available activity
-        if (routeActivityId && visibleActivities.some((a) => a.id === routeActivityId)) {
-          setActiveActivityId(routeActivityId);
+        // 4. Auto-select requested url/route activity or first available activity
+        let selectedId: string | null = null;
+        if (urlActivityId && visibleActivities.some((a) => a.id === urlActivityId)) {
+          selectedId = urlActivityId;
         } else if (visibleActivities.length > 0) {
-          setActiveActivityId(visibleActivities[0].id!);
+          selectedId = visibleActivities[0].id!;
+        }
+
+        if (selectedId) {
+          setActiveActivityId(selectedId);
+
+          // Context-Aware Accordion: ONLY expand the module containing the active activity
+          const targetAct = visibleActivities.find((a) => a.id === selectedId);
+          if (targetAct?.moduleId) {
+            setExpandedModuleIds([targetAct.moduleId]);
+          } else if (visibleModules.length > 0) {
+            setExpandedModuleIds([visibleModules[0].id!]);
+          }
+
+          // Sync URL query parameter without full reload
+          const currentUrlParam = searchParams.get("activityId");
+          if (currentUrlParam !== selectedId) {
+            const params = new URLSearchParams(searchParams.toString());
+            params.set("activityId", selectedId);
+            router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+          }
         }
       } catch (error) {
         console.error("Error loading student course player data:", error);
@@ -314,7 +337,30 @@ export default function StudentCoursePlayerPage({
     };
 
     loadCoursePlayerData();
-  }, [courseId, userData, user, authLoading, router]);
+  }, [courseId, userData, user, authLoading, router, pathname]);
+
+  // Keep state in sync if URL search params change (e.g. browser back/forward buttons)
+  useEffect(() => {
+    const actIdFromUrl = searchParams.get("activityId");
+    if (actIdFromUrl && actIdFromUrl !== activeActivityId && activities.some((a) => a.id === actIdFromUrl)) {
+      setActiveActivityId(actIdFromUrl);
+      const targetAct = activities.find((a) => a.id === actIdFromUrl);
+      if (targetAct?.moduleId) {
+        setExpandedModuleIds((prev) => (prev.includes(targetAct.moduleId!) ? prev : [...prev, targetAct.moduleId!]));
+      }
+    }
+  }, [searchParams, activities, activeActivityId]);
+
+  const handleSelectActivity = (actId: string) => {
+    setActiveActivityId(actId);
+    const targetAct = activities.find((a) => a.id === actId);
+    if (targetAct?.moduleId) {
+      setExpandedModuleIds((prev) => (prev.includes(targetAct.moduleId!) ? prev : [...prev, targetAct.moduleId!]));
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("activityId", actId);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
 
   const toggleModuleAccordion = (mId: string) => {
     setExpandedModuleIds((prev) =>
@@ -443,7 +489,8 @@ export default function StudentCoursePlayerPage({
                           key={act.id}
                           type="button"
                           onClick={() => {
-                            setActiveActivityId(act.id!);
+                            handleSelectActivity(act.id!);
+                            setIsMobileSheetOpen(false);
                             setIsMobileSidebarOpen(false);
                             window.scrollTo({ top: 0, behavior: "smooth" });
                           }}
@@ -476,40 +523,17 @@ export default function StudentCoursePlayerPage({
   return (
     <div className="min-h-screen bg-background text-on-background font-sans selection:bg-primary/20" dir="rtl">
       {/* Top Navbar Navigation */}
-      <header className="sticky top-0 z-30 bg-surface/85 backdrop-blur-xl border-b border-outline/15 px-4 sm:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-4">
-        {/* Full Breadcrumb Trail for Desktop / Tablet */}
-        <nav
-          aria-label="Breadcrumb"
-          className="hidden sm:flex items-center gap-2 text-xs font-semibold text-on-surface-variant overflow-x-auto whitespace-nowrap scrollbar-hide flex-1 min-w-0 mr-2"
-        >
-          <Link href="/dashboard" className="hover:text-primary hover:underline transition-colors shrink-0 flex items-center gap-1">
-            <ArrowRight className="w-4 h-4" />
-            <span>لوحة التحكم</span>
-          </Link>
-          <ChevronLeft className="w-4 h-4 text-outline/50 shrink-0" />
-          <span className="text-on-surface-variant font-semibold shrink-0">
-            {course.title}
-          </span>
-          {activeActivity && (
-            <>
-              <ChevronLeft className="w-4 h-4 text-outline/50 shrink-0" />
-              <span aria-current="page" className="text-on-surface font-bold shrink-0">
-                {activeActivity.title}
-              </span>
-            </>
-          )}
-        </nav>
-
-        {/* Compact Mobile Back Button (Only visible on small mobile screens) */}
+      <header className="sticky top-0 z-40 bg-surface/85 backdrop-blur-xl border-b border-outline/15 px-4 sm:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-4">
+        {/* Simple, Elegant Back Button */}
         <Link
           href="/dashboard"
-          className="flex sm:hidden items-center gap-1.5 text-xs font-bold text-on-surface-variant hover:text-primary transition-colors py-0.5"
+          className="flex items-center gap-2 text-xs font-bold text-on-surface-variant hover:text-primary transition-colors py-1.5 px-3 rounded-xl bg-surface-variant/30 hover:bg-surface-variant/60 border border-outline/10"
         >
           <ArrowRight className="w-4 h-4 text-primary" />
-          <span>لوحة التحكم</span>
+          <span>العودة إلى لوحة التحكم</span>
         </Link>
 
-        {/* Global Icons (Shrink-0 to prevent squishing on small screens) */}
+        {/* Global Icons */}
         <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
           <NotificationBell />
           <ThemeToggle />
@@ -517,7 +541,52 @@ export default function StudentCoursePlayerPage({
       </header>
 
       {/* Main Student Player Workspace */}
-      <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        {/* Top Back Navigation Link */}
+        <div className="mb-6 flex items-center justify-between">
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-2 text-xs font-bold text-on-surface-variant hover:text-primary transition-colors py-1"
+          >
+            <ArrowRight className="w-4 h-4 text-primary" />
+            <span>العودة إلى لوحة التحكم</span>
+          </Link>
+          <span className="text-xs font-extrabold text-on-surface-variant bg-surface-variant/40 px-3 py-1 rounded-xl">
+            {course.title}
+          </span>
+        </div>
+
+        {/* MOBILE STICKY INDEX (Visible only on small screens) */}
+        <div className="sticky top-0 z-40 lg:hidden bg-background/95 backdrop-blur-md p-3 sm:p-4 border-b border-border/50 mb-6 shadow-xs rounded-2xl">
+          <Sheet open={isMobileSheetOpen} onOpenChange={setIsMobileSheetOpen}>
+            <SheetTrigger asChild>
+              <button
+                type="button"
+                className="w-full flex justify-between items-center bg-card border border-border/50 rounded-xl px-4 py-2.5 shadow-xs text-primary font-bold text-xs cursor-pointer hover:bg-surface-variant/30 transition-colors"
+              >
+                <span className="flex items-center gap-2 font-bold text-primary">
+                  <Layers className="w-4 h-4" /> فهرس ومحتويات الدروس
+                </span>
+                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </SheetTrigger>
+            <SheetContent className="h-[80vh] overflow-y-auto" side="bottom">
+              <div className="py-2">
+                <div className="flex items-center justify-between gap-2 text-sm font-extrabold text-foreground pb-3 mb-3 border-b border-border/50">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-primary" />
+                    <span>فهرس ومحتويات الدروس</span>
+                  </div>
+                  <span className="text-xs font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-lg">
+                    {activities.length} نشاط
+                  </span>
+                </div>
+                {renderModulesList()}
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+
         {/* Revoked Enrollment Time-Bound Access Banner Rule 4 */}
         {isRevokedEnrollment && (
           <div className="mb-6 p-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center justify-between gap-3 shadow-xs animate-fadeIn">
@@ -532,26 +601,29 @@ export default function StudentCoursePlayerPage({
             </span>
           </div>
         )}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Side Module Navigation Panel (Desktop Side-by-Side: 4 cols) */}
-          <aside className="hidden lg:block lg:col-span-4 bg-surface border border-outline/15 rounded-3xl p-5 shadow-sm space-y-4 lg:sticky lg:top-20">
-            <div className="flex items-center justify-between border-b border-outline/10 pb-3">
-              <div className="flex items-center gap-2 text-xs font-extrabold text-on-surface">
-                <Layers className="w-4 h-4 text-primary" />
-                <span>محتويات الدورة المنهجية (فهرس الدروس)</span>
-              </div>
-              <span className="text-[11px] font-bold text-on-surface-variant bg-surface-variant/40 px-2.5 py-0.5 rounded-lg">
-                {modules.length} فصول
-              </span>
-            </div>
 
-            {renderModulesList()}
+        {/* Responsive Two-Column Layout */}
+        <div className="flex flex-col lg:flex-row items-start gap-8 relative">
+          {/* 1. DESKTOP ELEGANT SIDEBAR (Visible only on lg+) */}
+          <aside className="hidden lg:block lg:w-1/4 shrink-0 sticky top-20 h-[calc(100vh-6rem)] custom-scrollbar border-l border-outline/15 pl-4">
+            <div className="flex flex-col gap-3 overflow-y-auto h-full pr-1">
+              <div className="flex items-center justify-between border-b border-outline/10 pb-3">
+                <div className="flex items-center gap-2 text-xs font-extrabold text-on-surface">
+                  <Layers className="w-4 h-4 text-primary" />
+                  <span>فهرس ومحتويات الدروس</span>
+                </div>
+                <span className="text-[11px] font-bold text-on-surface-variant bg-surface-variant/40 px-2.5 py-0.5 rounded-lg">
+                  {activities.length} نشاط
+                </span>
+              </div>
+              {renderModulesList()}
+            </div>
           </aside>
 
-          {/* Main Native Activity Player Area (Left/Center in RTL - 8 cols on desktop, full width on mobile) */}
-          <section className="col-span-1 lg:col-span-8 space-y-6">
+          {/* 2. MAIN CONTENT AREA (Vertical List Item Flow) */}
+          <main className="flex-1 w-full flex flex-col gap-10 min-w-0 pb-10">
             {activeActivity ? (
-              <div className="space-y-6 animate-fadeIn">
+              <>
                 {/* Activity Native Header Card */}
                 <div className="bg-surface border border-outline/15 rounded-3xl p-6 shadow-sm space-y-4">
                   <div className="flex items-center justify-between flex-wrap gap-2">
@@ -574,186 +646,205 @@ export default function StudentCoursePlayerPage({
                   <h2 className="text-xl sm:text-2xl font-extrabold text-on-surface tracking-tight">
                     <MathText content={activeActivity.title} />
                   </h2>
-
-                  {/* Task C: Consolidated Prominent Mobile Index Toggle Button */}
-                  <button
-                    type="button"
-                    onClick={() => setIsMobileSidebarOpen(true)}
-                    className="w-full sm:w-auto px-4 py-2.5 rounded-2xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 font-extrabold text-xs transition-all flex items-center justify-center gap-2 shadow-2xs lg:hidden"
-                  >
-                    <Layers className="w-4 h-4 text-primary" />
-                    <span>فهرس ومحتويات الدروس</span>
-                  </button>
                 </div>
 
-                {/* 1. Description & Lesson Content Text Section (First element below title) */}
-                {activeActivity.description && activeActivity.description.trim() && (
-                  <div className="bg-surface border border-outline/15 rounded-3xl p-6 sm:p-8 shadow-sm space-y-3">
-                    <h3 className="text-sm font-extrabold text-on-surface flex items-center gap-2 border-b border-outline/10 pb-3">
-                      <Sparkles className="w-4 h-4 text-primary" />
-                      <span>شرح الدرس والمعادلات المنهجية</span>
-                    </h3>
-                    <div className="text-xs sm:text-sm text-on-surface leading-relaxed font-medium pt-1">
-                      <MathText content={activeActivity.description} />
-                    </div>
-                  </div>
-                )}
-
-                {/* Task C: Video Playlist UI (MD3 Clickable Cards) */}
-                {activeActivity.videos && activeActivity.videos.length > 0 && (
-                  <div className="bg-surface border border-outline/15 rounded-3xl p-6 shadow-sm space-y-4">
-                    <h3 className="text-sm font-extrabold text-on-surface flex items-center justify-between border-b border-outline/10 pb-3">
-                      <span className="flex items-center gap-2">
-                        <Video className="w-4 h-4 text-primary" />
-                        <span>فيديوهات الشرح التفاعلي</span>
-                      </span>
-                      <span className="text-xs font-bold text-on-surface-variant bg-surface-variant/40 px-2.5 py-0.5 rounded-lg">
-                        {activeActivity.videos.length} فيديو
-                      </span>
-                    </h3>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {activeActivity.videos.map((vidUrl, idx) => (
-                        <div
-                          key={idx}
-                          onClick={() => {
-                            setActiveVideo(formatYouTubeUrl(vidUrl));
-                            setIsFullscreen(false);
-                          }}
-                          className="p-4 rounded-2xl bg-surface-variant/20 hover:bg-primary/10 border border-outline/15 hover:border-primary/30 transition-all cursor-pointer group flex items-center justify-between gap-3 shadow-2xs"
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary group-hover:bg-primary group-hover:text-on-primary flex items-center justify-center shrink-0 transition-colors">
-                              <PlayCircle className="w-5 h-5" />
-                            </div>
-                            <div className="truncate">
-                              <span className="text-xs font-extrabold text-on-surface block truncate">
-                                فيديو الشرح التفاعلي #{idx + 1}
-                              </span>
-                              <span className="text-[10px] text-on-surface-variant/70 block">
-                                انقر لتشغيل الفيديو ملء الشاشة
-                              </span>
-                            </div>
+                {/* Unified Single-Open Accordion for Activities & Lessons */}
+                <Accordion className="w-full flex flex-col gap-4" collapsible defaultValue="section-lesson" type="single">
+                  {/* SECTION 1: Lesson */}
+                  {activeActivity.description && activeActivity.description.trim() && (
+                    <AccordionItem className="border-none bg-card/40 rounded-2xl overflow-hidden shadow-xs" value="section-lesson">
+                      <AccordionTrigger className="flex items-center justify-between p-5 hover:no-underline hover:bg-muted/50 transition-all [&[data-state=open]]:bg-muted/30 cursor-pointer w-full text-right">
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/20 text-primary font-bold text-sm">
+                            1
                           </div>
-
-                          <div className="w-8 h-8 rounded-lg bg-surface-variant/40 group-hover:bg-primary/20 text-on-surface-variant group-hover:text-primary flex items-center justify-center shrink-0 transition-colors">
-                            <Play className="w-4 h-4 fill-current" />
-                          </div>
+                          <h2 className="text-lg md:text-xl font-bold">شرح الدرس والمعادلات المنهجية</h2>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                      </AccordionTrigger>
+                      <AccordionContent className="px-5 pb-5 pt-2">
+                        <div className="pt-4 border-t border-border/20 text-xs sm:text-sm text-foreground leading-relaxed font-medium">
+                          <MathText content={activeActivity.description} />
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )}
 
-                {/* Task B: Structured PDF & Attachments Rich Cards Gallery */}
-                {activeActivity.attachments && activeActivity.attachments.length > 0 && (
-                  <div className="bg-surface border border-outline/15 rounded-3xl p-6 shadow-sm space-y-4">
-                    <h3 className="text-sm font-extrabold text-on-surface flex items-center justify-between border-b border-outline/10 pb-3">
-                      <span className="flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-secondary" />
-                        <span>المرفقات والملفات التعليمية المنهجية</span>
-                      </span>
-                      <span className="text-xs font-bold text-on-surface-variant bg-surface-variant/40 px-2.5 py-0.5 rounded-lg">
-                        {activeActivity.attachments.length} مرفق
-                      </span>
-                    </h3>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {activeActivity.attachments.map((item, idx) => {
-                        const isStr = typeof item === "string";
-                        const title = isStr ? `ملف المرفق #${idx + 1}` : item.title || `ملف المرفق #${idx + 1}`;
-                        const type = isStr ? "pdf" : item.type || "pdf";
-                        const url = isStr ? item : item.url;
-                        const description = !isStr ? item.description : "";
-                        const embedUrl = formatPdfEmbedUrl(url);
-
-                        const isVideo = type === "video";
-
-                        return (
-                          <div
-                            key={idx}
-                            onClick={() => {
-                              if (isVideo) {
-                                setActiveVideo(formatYouTubeUrl(url));
-                              } else {
-                                setActiveAttachment(embedUrl);
-                              }
-                              setIsFullscreen(false);
-                            }}
-                            className="p-4 rounded-2xl bg-surface-variant/20 hover:bg-secondary/10 border border-outline/15 hover:border-secondary/30 transition-all cursor-pointer group flex flex-col justify-between gap-3 shadow-2xs"
-                          >
-                            <div className="flex items-center justify-between gap-3">
+                  {/* SECTION 2: Attachments & Videos */}
+                  {((activeActivity.attachments && activeActivity.attachments.length > 0) ||
+                    (activeActivity.videos && activeActivity.videos.length > 0)) && (
+                    <AccordionItem className="border-none bg-card/40 rounded-2xl overflow-hidden shadow-xs" value="section-attachments">
+                      <AccordionTrigger className="flex items-center justify-between p-5 hover:no-underline hover:bg-muted/50 transition-all [&[data-state=open]]:bg-muted/30 cursor-pointer w-full text-right">
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/20 text-primary font-bold text-sm">
+                            2
+                          </div>
+                          <h2 className="text-lg md:text-xl font-bold">المرفقات والملفات التعليمية المنهجية</h2>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="px-5 pb-5 pt-2">
+                        <div className="pt-4 border-t border-border/20 grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Video Cards */}
+                          {activeActivity.videos?.map((vidUrl, idx) => (
+                            <div
+                              key={`vid-${idx}`}
+                              onClick={() => {
+                                setActiveVideo(formatYouTubeUrl(vidUrl));
+                                setIsFullscreen(false);
+                              }}
+                              className="p-4 rounded-2xl bg-surface-variant/20 hover:bg-primary/10 border border-outline/15 hover:border-primary/30 transition-all cursor-pointer group flex items-center justify-between gap-3 shadow-2xs"
+                            >
                               <div className="flex items-center gap-3 min-w-0">
-                                <div
-                                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${isVideo
-                                    ? "bg-primary/10 text-primary group-hover:bg-primary group-hover:text-on-primary"
-                                    : "bg-secondary/10 text-secondary group-hover:bg-secondary group-hover:text-on-secondary"
-                                    }`}
-                                >
-                                  {isVideo ? <Video className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
+                                <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary group-hover:bg-primary group-hover:text-on-primary flex items-center justify-center shrink-0 transition-colors">
+                                  <PlayCircle className="w-5 h-5" />
                                 </div>
                                 <div className="truncate">
                                   <span className="text-xs font-extrabold text-on-surface block truncate">
-                                    {title}
+                                    فيديو الشرح التفاعلي #{idx + 1}
                                   </span>
                                   <span className="text-[10px] text-on-surface-variant/70 block">
-                                    {isVideo ? "فيديو تفاعلي - انقر للمشاهدة" : "مستند PDF - انقر للمعاينة والتحميل"}
+                                    انقر لتشغيل الفيديو ملء الشاشة
                                   </span>
                                 </div>
                               </div>
 
-                              <div className="w-8 h-8 rounded-lg bg-surface-variant/40 group-hover:bg-secondary/20 text-on-surface-variant group-hover:text-secondary flex items-center justify-center shrink-0 transition-colors">
-                                {isVideo ? <Play className="w-4 h-4 fill-current" /> : <Eye className="w-4 h-4" />}
+                              <div className="w-8 h-8 rounded-lg bg-surface-variant/40 group-hover:bg-primary/20 text-on-surface-variant group-hover:text-primary flex items-center justify-center shrink-0 transition-colors">
+                                <Play className="w-4 h-4 fill-current" />
                               </div>
                             </div>
+                          ))}
 
-                            {description && (
-                              <p className="text-[11px] text-on-surface-variant/80 font-medium leading-relaxed pt-2 border-t border-outline/10">
-                                {description}
-                              </p>
-                            )}
+                          {/* Attachment Cards */}
+                          {activeActivity.attachments?.map((item, idx) => {
+                            const isStr = typeof item === "string";
+                            const title = isStr ? `ملف المرفق #${idx + 1}` : item.title || `ملف المرفق #${idx + 1}`;
+                            const type = isStr ? "pdf" : item.type || "pdf";
+                            const url = isStr ? item : item.url;
+                            const description = !isStr ? item.description : "";
+                            const embedUrl = formatPdfEmbedUrl(url);
+                            const isVideo = type === "video";
+
+                            return (
+                              <div
+                                key={`att-${idx}`}
+                                onClick={() => {
+                                  if (isVideo) {
+                                    setActiveVideo(formatYouTubeUrl(url));
+                                  } else {
+                                    setActiveAttachment(embedUrl);
+                                  }
+                                  setIsFullscreen(false);
+                                }}
+                                className="p-4 rounded-2xl bg-surface-variant/20 hover:bg-secondary/10 border border-outline/15 hover:border-secondary/30 transition-all cursor-pointer group flex flex-col justify-between gap-3 shadow-2xs"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <div
+                                      className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                                        isVideo
+                                          ? "bg-primary/10 text-primary group-hover:bg-primary group-hover:text-on-primary"
+                                          : "bg-secondary/10 text-secondary group-hover:bg-secondary group-hover:text-on-secondary"
+                                      }`}
+                                    >
+                                      {isVideo ? <Video className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
+                                    </div>
+                                    <div className="truncate">
+                                      <span className="text-xs font-extrabold text-on-surface block truncate">
+                                        {title}
+                                      </span>
+                                      <span className="text-[10px] text-on-surface-variant/70 block">
+                                        {isVideo ? "فيديو تفاعلي - انقر للمشاهدة" : "مستند PDF - انقر للمعاينة والتحميل"}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="w-8 h-8 rounded-lg bg-surface-variant/40 group-hover:bg-secondary/20 text-on-surface-variant group-hover:text-secondary flex items-center justify-center shrink-0 transition-colors">
+                                    {isVideo ? <Play className="w-4 h-4 fill-current" /> : <Eye className="w-4 h-4" />}
+                                  </div>
+                                </div>
+
+                                {description && (
+                                  <p className="text-[11px] text-on-surface-variant/80 font-medium leading-relaxed pt-2 border-t border-outline/10">
+                                    {description}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )}
+
+                  {/* SECTION 3: AI Station */}
+                  {activeActivity.id && (
+                    <AccordionItem className="border-none bg-card/40 rounded-2xl overflow-hidden shadow-xs" value="section-ai">
+                      <AccordionTrigger className="flex items-center justify-between p-5 hover:no-underline hover:bg-indigo-500/10 transition-all [&[data-state=open]]:bg-indigo-500/5 cursor-pointer w-full text-right">
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 font-bold text-sm">
+                            3
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                          <h2 className="text-lg md:text-xl font-bold flex items-center gap-2">
+                            المساعد الذكي السقراطي - المحطات التفاعلية
+                            <Sparkles className="w-5 h-5 text-indigo-400" />
+                          </h2>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="px-0 pb-0 pt-0">
+                        <div className="border-t border-indigo-500/20">
+                          <SocraticStationChat
+                            key={activeActivity.id}
+                            studentId={studentUid}
+                            studentName={studentName}
+                            studentEmail={studentEmail}
+                            courseId={courseId}
+                            courseName={course?.title}
+                            moduleName={modules.find((m) => m.id === activeActivity.moduleId)?.title || ""}
+                            courseIndexContext={course?.courseIndexContext}
+                            activityId={activeActivity.id}
+                            activityTitle={activeActivity.title}
+                            activityDescription={activeActivity.description}
+                            globalLatexSummary={activeActivity.globalLatexSummary}
+                            globalCustomIsolations={activeActivity.globalCustomIsolations}
+                            attachments={activeActivity.attachments || []}
+                            stations={activeActivity.stations || []}
+                            onSubmissionUrlsChange={setCurrentSubmissionUrls}
+                          />
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )}
 
-                {/* Socratic Station-by-Station AI Chat Interface */}
-                {activeActivity.id && (
-                  <SocraticStationChat
-                    key={activeActivity.id}
-                    studentId={studentUid}
-                    studentName={studentName}
-                    studentEmail={studentEmail}
-                    courseId={courseId}
-                    courseName={course?.title}
-                    moduleName={modules.find((m) => m.id === activeActivity.moduleId)?.title || ""}
-                    courseIndexContext={course?.courseIndexContext}
-                    activityId={activeActivity.id}
-                    activityTitle={activeActivity.title}
-                    activityDescription={activeActivity.description}
-                    globalLatexSummary={activeActivity.globalLatexSummary}
-                    globalCustomIsolations={activeActivity.globalCustomIsolations}
-                    attachments={activeActivity.attachments || []}
-                    stations={activeActivity.stations || []}
-                    onSubmissionUrlsChange={setCurrentSubmissionUrls}
-                  />
-                )}
-
-                {/* Real Interactive Quiz Taker (If quiz exists) */}
-                {activeActivity.hasQuiz && activeActivity.quiz && activeActivity.quiz.length > 0 && (
-                  <RealQuizTaker
-                    studentId={studentUid}
-                    studentName={studentName}
-                    studentEmail={studentEmail}
-                    courseId={courseId}
-                    activityId={activeActivity.id!}
-                    activityTitle={activeActivity.title}
-                    quizQuestions={activeActivity.quiz}
-                  />
-                )}
-              </div>
+                  {/* SECTION 4: Real Interactive Quiz Taker (If quiz exists) */}
+                  {activeActivity.hasQuiz && activeActivity.quiz && activeActivity.quiz.length > 0 && (
+                    <AccordionItem className="border-none bg-card/40 rounded-2xl overflow-hidden shadow-xs" value="section-quiz">
+                      <AccordionTrigger className="flex items-center justify-between p-5 hover:no-underline hover:bg-emerald-500/10 transition-all [&[data-state=open]]:bg-emerald-500/5 cursor-pointer w-full text-right">
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-sm">
+                            4
+                          </div>
+                          <h2 className="text-lg md:text-xl font-bold flex items-center gap-2">
+                            التقييم والاختبار التفاعلي
+                            <Trophy className="w-5 h-5 text-emerald-400" />
+                          </h2>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="px-5 pb-5 pt-2">
+                        <div className="pt-4 border-t border-emerald-500/20">
+                          <RealQuizTaker
+                            studentId={studentUid}
+                            studentName={studentName}
+                            studentEmail={studentEmail}
+                            courseId={courseId}
+                            activityId={activeActivity.id!}
+                            activityTitle={activeActivity.title}
+                            quizQuestions={activeActivity.quiz}
+                          />
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )}
+                </Accordion>
+              </>
             ) : (
               <div className="bg-surface border border-outline/15 rounded-3xl p-12 text-center space-y-4 shadow-sm">
                 <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto border border-primary/20">
@@ -765,65 +856,42 @@ export default function StudentCoursePlayerPage({
                 </p>
               </div>
             )}
-          </section>
+          </main>
         </div>
-      </main>
+      </div>
 
-      {/* Task C: Mobile Sidebar Drawer Bottom Sheet Overlay */}
-      {isMobileSidebarOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm lg:hidden flex flex-col justify-end animate-fadeIn"
-          dir="rtl"
-          onClick={() => setIsMobileSidebarOpen(false)}
-        >
-          <div
-            className="bg-surface border-t border-outline/20 rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto space-y-4 shadow-2xl animate-slideUp"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-outline/10 pb-3">
-              <div className="flex items-center gap-2 text-xs font-extrabold text-on-surface">
-                <Layers className="w-4 h-4 text-primary" />
-                <span>فهرس ومحتويات الدورة المنهجية</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsMobileSidebarOpen(false)}
-                aria-label="إغلاق الفهرس"
-                className="p-1.5 rounded-full bg-surface-variant/40 text-on-surface-variant hover:bg-surface-variant"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {renderModulesList()}
-          </div>
-        </div>
-      )}
-
-      {/* Task A: Responsive Fullscreen Video Modal Overlay */}
+      {/* Responsive Video Modal Overlay */}
       {activeVideo && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-0 lg:p-12 backdrop-blur-sm animate-fadeIn"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fadeIn p-0 sm:p-4"
           dir="rtl"
+          onClick={() => {
+            setActiveVideo(null);
+            setIsFullscreen(false);
+          }}
         >
           <div
-            className={`relative bg-surface overflow-hidden shadow-2xl transition-all duration-300 flex flex-col border border-outline/20 ${isFullscreen
-              ? "w-full h-full rounded-none fixed inset-0 z-[200]"
-              : "w-full max-w-5xl aspect-video rounded-2xl sm:w-full sm:h-full sm:rounded-none sm:fixed sm:inset-0"
-              }`}
+            className={`bg-card text-card-foreground shadow-2xl transition-all duration-300 flex flex-col overflow-hidden ${
+              isFullscreen
+                ? "fixed inset-0 z-[200] w-full h-[100dvh] max-w-[100vw] rounded-none m-0 p-0 border-0"
+                : "w-full h-[100dvh] max-w-[100vw] rounded-none sm:h-[85vh] sm:max-w-4xl sm:rounded-2xl border border-border/40"
+            }`}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-3.5 bg-surface-variant/80 flex items-center justify-between border-b border-outline/20 shrink-0">
-              <span className="font-extrabold text-xs sm:text-sm text-on-surface flex items-center gap-2">
+            <div className="p-3.5 bg-muted/30 border-b border-border/40 flex items-center justify-between shrink-0">
+              <span className="font-bold text-sm text-foreground flex items-center gap-2">
                 <Video className="w-4 h-4 text-primary" />
                 <span>مشغّل فيديو الشرح التفاعلي</span>
               </span>
 
               <div className="flex items-center gap-2">
+                {/* Fullscreen Toggle Button (Hidden on Mobile) */}
                 <button
                   type="button"
-                  onClick={() => setIsFullscreen((prev) => !prev)}
-                  aria-label="تغيير حجم الشاشة"
-                  className="hidden md:flex p-1.5 bg-surface-variant/80 hover:bg-surface-variant text-on-surface rounded-xl transition-colors"
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  title={isFullscreen ? "تصغير" : "تكبير الشاشة"}
+                  aria-label={isFullscreen ? "تصغير" : "تكبير الشاشة"}
+                  className="hidden sm:flex items-center justify-center p-2 bg-surface-variant/40 hover:bg-surface-variant text-foreground rounded-xl transition-colors cursor-pointer"
                 >
                   {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                 </button>
@@ -835,7 +903,7 @@ export default function StudentCoursePlayerPage({
                     setIsFullscreen(false);
                   }}
                   aria-label="إغلاق التشغيل"
-                  className="p-1.5 bg-error/10 text-error hover:bg-error hover:text-on-error rounded-xl transition-colors"
+                  className="p-2 bg-error/10 text-error hover:bg-error hover:text-on-error rounded-xl transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -855,30 +923,38 @@ export default function StudentCoursePlayerPage({
         </div>
       )}
 
-      {/* Task A: Responsive Fullscreen Attachment Modal Overlay */}
+      {/* Responsive Fullscreen Attachment Modal Overlay */}
       {activeAttachment && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-0 lg:p-12 backdrop-blur-sm animate-fadeIn"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fadeIn p-0 sm:p-4"
           dir="rtl"
+          onClick={() => {
+            setActiveAttachment(null);
+            setIsFullscreen(false);
+          }}
         >
           <div
-            className={`relative bg-surface overflow-hidden shadow-2xl transition-all duration-300 flex flex-col border border-outline/20 ${isFullscreen
-              ? "w-full h-full rounded-none fixed inset-0 z-[200]"
-              : "w-full max-w-5xl h-[85vh] rounded-2xl sm:w-full sm:h-full sm:rounded-none sm:fixed sm:inset-0"
-              }`}
+            className={`bg-card text-card-foreground shadow-2xl transition-all duration-300 flex flex-col overflow-hidden ${
+              isFullscreen
+                ? "fixed inset-0 z-[200] w-full h-[100dvh] max-w-[100vw] rounded-none m-0 p-0 border-0"
+                : "w-full h-[100dvh] max-w-[100vw] rounded-none sm:h-[85vh] sm:max-w-4xl sm:rounded-2xl border border-border/40"
+            }`}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-3.5 bg-surface-variant/80 flex items-center justify-between border-b border-outline/20 shrink-0">
-              <span className="font-extrabold text-xs sm:text-sm text-on-surface flex items-center gap-2">
+            <div className="p-3.5 bg-muted/30 border-b border-border/40 flex items-center justify-between shrink-0">
+              <span className="font-bold text-sm text-foreground flex items-center gap-2">
                 <FileText className="w-4 h-4 text-secondary" />
                 <span>معاينة المستند والملف المرفق</span>
               </span>
 
               <div className="flex items-center gap-2">
+                {/* Fullscreen Toggle Button (Hidden on Mobile) */}
                 <button
                   type="button"
-                  onClick={() => setIsFullscreen((prev) => !prev)}
-                  aria-label="تغيير حجم الشاشة"
-                  className="hidden md:flex p-1.5 bg-surface-variant/80 hover:bg-surface-variant text-on-surface rounded-xl transition-colors"
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  title={isFullscreen ? "تصغير" : "تكبير الشاشة"}
+                  aria-label={isFullscreen ? "تصغير" : "تكبير الشاشة"}
+                  className="hidden sm:flex items-center justify-center p-2 bg-surface-variant/40 hover:bg-surface-variant text-foreground rounded-xl transition-colors cursor-pointer"
                 >
                   {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                 </button>
@@ -890,14 +966,14 @@ export default function StudentCoursePlayerPage({
                     setIsFullscreen(false);
                   }}
                   aria-label="إغلاق المعاينة"
-                  className="p-1.5 bg-error/10 text-error hover:bg-error hover:text-on-error rounded-xl transition-colors"
+                  className="p-2 bg-error/10 text-error hover:bg-error hover:text-on-error rounded-xl transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            <div className="flex-1 w-full h-full bg-surface-variant/20">
+            <div className="flex-1 w-full h-full bg-background/50">
               <iframe
                 src={activeAttachment}
                 title="Attachment Viewer Overlay"

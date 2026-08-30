@@ -3,7 +3,7 @@
 import React, { useState, useEffect, use, useRef, FormEvent } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   getCourseById,
   getModuleById,
@@ -418,6 +418,7 @@ export default function ActivityEditorPage({
   const courseId = resolvedParams.courseId;
   const activityId = resolvedParams.activityId;
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
 
   const [course, setCourse] = useState<CourseDoc | null>(null);
@@ -431,7 +432,29 @@ export default function ActivityEditorPage({
   const [activityMode, setActivityMode] = useState<"theoretical" | "interactive">("interactive");
 
   type StudioTab = "basic" | "attachments" | "stations" | "ai" | "settings";
+
+  // 1. Local state (defaults to 'basic')
   const [activeTab, setActiveTab] = useState<StudioTab>("basic");
+
+  // 2. Sync state FROM URL safely after component mounts (fixes SSR mismatch & refresh)
+  useEffect(() => {
+    const tabFromUrl = searchParams.get("tab") as StudioTab | null;
+    const validTabs: StudioTab[] = ["basic", "attachments", "stations", "ai", "settings"];
+    if (tabFromUrl && validTabs.includes(tabFromUrl) && tabFromUrl !== activeTab) {
+      setActiveTab(tabFromUrl);
+    }
+  }, [searchParams]);
+
+  // 3. Sync state TO URL instantly bypassing Next.js router batching
+  const handleTabChange = (value: StudioTab) => {
+    setActiveTab(value);
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      params.set("tab", value);
+      window.history.replaceState(null, "", `?${params.toString()}`);
+    }
+  };
+
   const [tabErrors, setTabErrors] = useState<Record<StudioTab, boolean>>({
     basic: false,
     attachments: false,
@@ -443,7 +466,7 @@ export default function ActivityEditorPage({
   // Auto fallback to basic tab if activityMode becomes theoretical while on stations tab
   useEffect(() => {
     if (activityMode === "theoretical" && activeTab === "stations") {
-      setActiveTab("basic");
+      handleTabChange("basic");
     }
   }, [activityMode, activeTab]);
 
@@ -1385,7 +1408,7 @@ export default function ActivityEditorPage({
     setTabErrors(errors);
 
     if (errors.basic) {
-      setActiveTab("basic");
+      handleTabChange("basic");
       toast({
         title: "عنوان النشاط مفقود",
         description: "يرجى إدخال عنوان النشاط التعليمي أولاً في قسم المحتوى الأساسي.",
@@ -1608,7 +1631,7 @@ export default function ActivityEditorPage({
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => setActiveTab(t.id)}
+                      onClick={() => handleTabChange(t.id)}
                       className={`w-full px-3.5 py-3 rounded-2xl text-xs font-bold transition-all flex items-center justify-between gap-2.5 cursor-pointer text-right shrink-0 ${
                         isActive
                           ? "bg-primary text-on-primary shadow-xs font-black scale-[1.01]"

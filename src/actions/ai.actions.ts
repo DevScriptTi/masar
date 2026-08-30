@@ -94,6 +94,30 @@ export interface CurrentStationDraft {
   pedagogyRules?: string;
 }
 
+function sanitizeStationOutput(str: string): string {
+  if (!str) return "";
+  let cleaned = str
+    // 1. Clean 3 or more consecutive dollar signs ($$$ or $$$$) to exactly $$
+    .replace(/\${3,}/g, "$$")
+    // 2. Clean empty or consecutive display math blocks ($$ $$)
+    .replace(/\$\$\s*\$\$/g, "$$")
+    // 3. Decode any HTML entities inside math
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+
+  // 4. Ensure paragraphs are properly separated for Quill/HTML rendering
+  if (!cleaned.includes("<p>") && !cleaned.includes("<br")) {
+    cleaned = cleaned
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map((line) => `<p>${line.trim()}</p>`)
+      .join("");
+  }
+
+  return cleaned;
+}
+
 export async function generateStationFromAttachmentAction(
   fileUrl: string,
   mimeType: string,
@@ -132,7 +156,7 @@ ${currentDraft?.pedagogyRules || "لا يوجد بعد"}
 
 🛑 CRITICAL REFINEMENT INSTRUCTIONS:
 1. Do NOT start from scratch unless explicitly requested! Take the CURRENT DRAFT above as your baseline truth.
-2. Apply the teacher's instruction precisely to this draft (e.g. adding line breaks between questions, formatting formulas with KaTeX $ / $$, correcting calculations, numbering sub-questions, elaborating on pedagogical steps).
+2. Apply the teacher's instruction precisely to this draft (e.g. adding line breaks between questions with <p>...</p> tags, formatting formulas with KaTeX $ / $$, correcting calculations, numbering sub-questions).
 3. If an attached document is present, use it as reference to verify or complete information, while preserving all valid draft edits.
 4. Maintain all three sections cleanly: "challenge", "groundTruth", and "pedagogy".`;
     } else {
@@ -145,26 +169,30 @@ Generate pedagogical guardrails and recommendations for a Socratic AI Tutor that
     systemPrompt += `
 
 HTML & FORMATTING RULES:
-1. The outputs will be rendered inside an HTML Rich Text Editor. Use <br/> for new lines between questions/paragraphs.
-2. MATH & INEQUALITIES (CRITICAL): NEVER use HTML entities (like &lt;, &gt;, or &amp;) for mathematical inequalities or formulas. You MUST use raw "<" and ">" symbols, or standard LaTeX commands like \\le and \\ge, exclusively inside LaTeX blocks.
-3. STRICT LATEX DELIMITERS: Every single mathematical variable, number, fraction, root, inequality, or equation MUST be strictly wrapped in $ (for inline math) or $$ (for display block math). Do NOT leave math symbols or commands like \\sqrt in plain text. Example: Write "$\\sqrt{3} > 1$" instead of "\\sqrt{3} &gt; 1" or "$\\sqrt{3}$ &gt; 1".
-4. JSON ESCAPING: Since your output is JSON, you MUST double-escape all LaTeX backslashes. For example, write \\\\sqrt instead of \\sqrt, and \\\\frac instead of \\frac, and \\\\lim instead of \\lim.
+1. OUTPUT AS CLEAN HTML: Wrap distinct titles, instructions, and questions in <p>...</p> tags or <ol><li>...</li></ol> (e.g. <p><strong>التمرين الأول:</strong></p><p>1. انشر ثم بسط العبارة $P(x)$.</p>).
+2. DOLLAR SIGN DELIMITERS (STRICT):
+   - For inline formulas/variables, use EXACTLY ONE dollar sign: $x$, $P(x)$, $\\mathbb{R}$.
+   - For standalone display equations, use EXACTLY TWO dollar signs: $$P(x) = (2x - 3)^2 - (x + 1)^2$$
+   - NEVER EVER write 3 or 4 consecutive dollar signs (like $$$ or $$$$)!
+3. MATH & INEQUALITIES (CRITICAL): NEVER use HTML entities (like &lt;, &gt;, or &amp;) for mathematical inequalities or formulas. You MUST use raw "<" and ">" symbols, or standard LaTeX commands like \\le and \\ge, exclusively inside LaTeX blocks.
+4. STRICT LATEX DELIMITERS: Every single mathematical variable, number, fraction, root, inequality, or equation MUST be strictly wrapped in $ (for inline math) or $$ (for display block math). Do NOT leave math symbols or commands like \\sqrt in plain text. Example: Write "$\\sqrt{3} > 1$" instead of "\\sqrt{3} &gt; 1" or "$\\sqrt{3}$ &gt; 1".
+5. JSON ESCAPING: Since your output is JSON, you MUST double-escape all LaTeX backslashes. For example, write \\\\sqrt instead of \\sqrt, and \\\\frac instead of \\frac, and \\\\lim instead of \\lim.
 
 CRITICAL OUTPUT RULES:
-1. "challenge": The complete exercise text written cleanly in Arabic with explicit HTML line breaks (<br/>) between question items and properly formatted LaTeX ($ ... $ inline, $$ ... $$ display blocks). Every single question must be on a new line.
-2. "groundTruth": The thorough step-by-step mathematical/conceptual solution in Arabic and LaTeX with clear line breaks (<br/>) between steps (HIDDEN rubric for AI evaluation). For limits always use \\lim\\limits_{x \\to a}.
-3. "pedagogy": Strict pedagogical rules and negative guardrails for the Socratic agent formatted with clean bullet points (<br/> or <ul><li>...</li></ul>) (e.g. do not give away the final result, probe on sign mistakes, guide with hints).
+1. "challenge": The complete exercise text written cleanly in Arabic with explicit HTML paragraph tags (<p>...</p>) between question items and properly formatted LaTeX ($ ... $ inline, $$ ... $$ display blocks). Every single question must be wrapped in its own <p> tag.
+2. "groundTruth": The thorough step-by-step mathematical/conceptual solution in Arabic and LaTeX with clear line breaks and <p> tags between steps (HIDDEN rubric for AI evaluation). For limits always use \\lim\\limits_{x \\to a}.
+3. "pedagogy": Strict pedagogical rules and negative guardrails for the Socratic agent formatted with clean bullet points (<ul><li>...</li></ul>) (e.g. do not give away the final result, probe on sign mistakes, guide with hints).
 
 You MUST return ONLY a valid JSON object matching this exact structure:
 {
-  "challenge": "نص التمرين باللغة العربية واللاتكس مع <br/> بين كل سؤال وسؤال...",
-  "groundTruth": "الحل النموذجي المفصل خطوة بخطوة باللاتكس مع <br/> بين الخطوات...",
-  "pedagogy": "التوصيات البيداغوجية والتوجيهات السرية للوكيل السقراطي..."
+  "challenge": "<p><strong>التمرين الأول:</strong></p><p>1. انشر وبسط العبارة $P(x)$...</p>",
+  "groundTruth": "<p>الحل النموذجي المفصل خطوة بخطوة باللاتكس...</p>",
+  "pedagogy": "<ul><li>التوصيات البيداغوجية والتوجيهات السرية للوكيل السقراطي...</li></ul>"
 }`;
 
     const parts: any[] = [
       { text: systemPrompt },
-      { text: "User Instruction: " + (userInstruction || (hasExistingDraft ? "قم بتنقيح وتنسيق المسودة الحالية وجعل كل سؤال على سطر مستقل مع الحفاظ على صياغة اللاتكس." : "استخرج نص التمرين كاملاً مع كتابة الحل النموذجي المفصل والتوصيات البيداغوجية للوكيل السقراطي.")) },
+      { text: "User Instruction: " + (userInstruction || (hasExistingDraft ? "قم بتنقيح وتنسيق المسودة الحالية وجعل كل سؤال في فقرة <p> مستقلة مع الحفاظ على صياغة اللاتكس النظيفة." : "استخرج نص التمرين كاملاً مع كتابة الحل النموذجي المفصل والتوصيات البيداغوجية للوكيل السقراطي.")) },
     ];
 
     if (base64Data && base64Data.trim() !== "") {
@@ -248,9 +276,9 @@ You MUST return ONLY a valid JSON object matching this exact structure:
     return {
       success: true,
       data: {
-        challenge: stationData.challenge || "",
-        groundTruth: stationData.groundTruth || "",
-        pedagogy: stationData.pedagogy || stationData.pedagogyRules || "",
+        challenge: sanitizeStationOutput(stationData.challenge || ""),
+        groundTruth: sanitizeStationOutput(stationData.groundTruth || ""),
+        pedagogy: sanitizeStationOutput(stationData.pedagogy || stationData.pedagogyRules || ""),
       },
     };
   } catch (error: any) {

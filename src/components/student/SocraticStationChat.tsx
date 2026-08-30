@@ -27,6 +27,7 @@ import Zoom from "yet-another-react-lightbox/plugins/zoom";
 import Counter from "yet-another-react-lightbox/plugins/counter";
 import "yet-another-react-lightbox/styles.css";
 import "yet-another-react-lightbox/plugins/counter.css";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/src/components/ui/collapsible";
 import {
   Sparkles,
   Send,
@@ -45,6 +46,8 @@ import {
   Trash2,
   Maximize2,
   Minimize2,
+  BookOpen,
+  ChevronDown,
 } from "lucide-react";
 
 export interface ChatMessage {
@@ -281,11 +284,38 @@ export function SocraticStationChat({
   }, [stationChats, currentStationKey]);
 
   const [isFetchingChatHistory, setIsFetchingChatHistory] = useState(true);
+  const prevMessageCount = useRef<number>(0);
+  const isHistoryLoaded = useRef<boolean>(false);
 
-  // Auto-scroll to bottom on new messages or AI thinking state change
+  // Reset history tracker when switching stations
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [currentStationMessages, isAiThinking]);
+    isHistoryLoaded.current = false;
+    prevMessageCount.current = 0;
+  }, [currentStationKey]);
+
+  // Auto-scroll ONLY when message count INCREASES after initial load
+  useEffect(() => {
+    // If still fetching history from Firestore, keep ref updated without scrolling
+    if (isFetchingChatHistory) {
+      prevMessageCount.current = currentStationMessages.length;
+      return;
+    }
+
+    // First time history finishes loading, initialize ref without scrolling
+    if (!isHistoryLoaded.current) {
+      isHistoryLoaded.current = true;
+      prevMessageCount.current = currentStationMessages.length;
+      return;
+    }
+
+    // Only scroll if the number of messages has INCREASED (i.e. user sent a message or AI responded)
+    if (currentStationMessages.length > prevMessageCount.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+
+    // Always update ref to current length
+    prevMessageCount.current = currentStationMessages.length;
+  }, [currentStationMessages.length, isFetchingChatHistory]);
 
   // Step A: Fetch station chat history from Firestore on mount & when station/student changes
   useEffect(() => {
@@ -834,16 +864,28 @@ export function SocraticStationChat({
         </div>
       )}
 
-      {/* Current Task Focus Card (Strict Rule Requirement 2: Render ONLY IF hasStations & currentStation exist) */}
+      {/* Current Task Focus Card (Collapsible Exercise Challenge Header & Body) */}
       {!isFullscreen && hasStations && currentStation && (
-        <div className="p-3 sm:p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 space-y-1 shrink-0">
-          <span className="text-[11px] font-extrabold text-indigo-700 dark:text-indigo-300 block">
-            المهمة المطلوبة في {currentStation.title || `المحطة #${activeStationIndex + 1}`}:
-          </span>
-          <div className="text-xs font-medium text-on-surface">
-            <MathText content={currentStation.challenge || currentStation.content} />
-          </div>
-        </div>
+        <Collapsible
+          defaultOpen={false}
+          className="w-full border border-outline/20 rounded-2xl bg-surface shadow-2xs mb-3 shrink-0 overflow-hidden"
+        >
+          <CollapsibleTrigger className="flex items-center justify-between w-full px-4 py-2.5 bg-surface-variant/30 hover:bg-surface-variant/50 transition-colors cursor-pointer group text-right">
+            <div className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-primary" />
+              <span className="text-xs font-bold text-primary">
+                نص التمرين ({currentStation.title || `المحطة #${activeStationIndex + 1}`}) - انقر للعرض / الإخفاء
+              </span>
+            </div>
+            <ChevronDown className="w-4 h-4 text-on-surface-variant/70 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+          </CollapsibleTrigger>
+
+          <CollapsibleContent>
+            <div className="p-4 max-h-[40vh] overflow-y-auto prose prose-sm dark:prose-invert max-w-none text-right custom-scrollbar border-t border-outline/15 text-xs font-medium text-on-surface">
+              <MathText content={currentStation.challenge || currentStation.content} />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {/* Chat Messages Timeline (Scrollable Area for Messenger UX) */}
@@ -949,7 +991,7 @@ export function SocraticStationChat({
 
       {/* Attached Images Preview */}
       {attachedImages.length > 0 && (
-        <div className={`p-3 rounded-2xl bg-surface border border-outline/20 space-y-2 shrink-0 ${isFullscreen ? "mx-3.5 sm:mx-6" : ""}`}>
+        <div className={`p-3 rounded-2xl bg-surface border border-outline/20 space-y-2 max-h-[35vh] overflow-y-auto shrink-0 ${isFullscreen ? "mx-3.5 sm:mx-6" : ""}`}>
           <span className="text-[11px] font-bold text-on-surface flex items-center gap-1.5">
             <ImageIcon className="w-3.5 h-3.5 text-primary" />
             <span>الصور المرفقة المعينة للإرسال: ({attachedImages.length})</span>
@@ -973,7 +1015,7 @@ export function SocraticStationChat({
 
       {/* Image Uploader Drawer */}
       {showImageUploader && (
-        <div className={`p-4 rounded-2xl bg-surface border border-outline/20 space-y-2 animate-fadeIn shrink-0 ${isFullscreen ? "mx-3.5 sm:mx-6" : ""}`}>
+        <div className={`p-4 rounded-2xl bg-surface border border-outline/20 space-y-2 animate-fadeIn max-h-[35vh] overflow-y-auto shrink-0 ${isFullscreen ? "mx-3.5 sm:mx-6" : ""}`}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-on-surface flex items-center gap-1.5">
               <ImageIcon className="w-4 h-4 text-primary" />
@@ -999,7 +1041,7 @@ export function SocraticStationChat({
       {/* Bottom Input Controls Bar (Fixed Bottom in Fullscreen & Mobile) */}
       <div className={`shrink-0 p-2.5 sm:p-3 bg-surface border-t border-outline/25 z-20 ${isFullscreen ? "w-full" : "rounded-2xl border shadow-2xs"}`} dir="rtl">
         {/* Fabulous Sleek Modern Input Card Wrapper */}
-        <div className="relative flex flex-col w-full rounded-2xl bg-surface border border-outline/20 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50 transition-all duration-300 shadow-sm p-2 gap-2">
+        <div className="relative flex flex-col w-full rounded-2xl bg-surface border border-outline/20 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50 transition-all duration-300 shadow-sm p-2 gap-2 shrink-0">
           {/* Main Input TextareaAutosize */}
           <TextareaAutosize
             ref={textareaRef as any}
@@ -1014,7 +1056,7 @@ export function SocraticStationChat({
               }
             }}
             placeholder="اكتب إجابتك، أو استخدم مسودة إضافة المعادلات بالضغط على (+ إضافة معادلة)..."
-            className="w-full bg-transparent resize-none p-3 text-sm outline-none placeholder:text-muted-foreground font-arabic leading-relaxed text-right dir-rtl text-on-surface"
+            className="w-full min-h-[40px] shrink-0 bg-transparent resize-none p-3 text-sm outline-none placeholder:text-muted-foreground font-arabic leading-relaxed text-right dir-rtl text-on-surface"
           />
 
           {/* Action Button Group */}
@@ -1134,10 +1176,32 @@ ${studentName} (ID: ${studentId})
 الوحدة التعليمية: ${moduleName || 'غير محدد'}
 النشاط الحالي (مهمتك الأساسية): ${activityTitle || 'غير محدد'}
 
-🛑 [قوانين صارمة جداً (Guardrails) - التزم بها حرفياً]:
-1. التركيز المطلق: دورك ينحصر *فقط* في شرح ومناقشة "النشاط الحالي". يُمنع القفز لدروس متقدمة.
-2. حظر الأكواد والأدوات (No JSON/Tools): أنت لا تملك أدوات خارجية. يُمنع منعاً باتاً كتابة أي أكواد برمجية، أو أوامر JSON (مثل action أو parameters). تواصل بنص طبيعي بشري فقط.
-3. المنهجية السقراطية: لا تعطِ الحلول المباشرة، وجه التلميذ بأسئلة متدرجة.
+🛑 [البروتوكول العسكري للفحص (Strict Audit Protocol) - إجباري وحتمي]:
+أنت لست مساعداً تقليدياً للدردشة، أنت "مفتش تدريب صارم ودقيق". يُمنع منعاً باتاً الرد بفقرات سردية أو مجاملات طويلة. 
+عندما يرسل التلميذ إجابة (خاصة الصور)، يجب عليك مقارنة إجابته بـ [الحل النموذجي المعتمد] نقطة بنقطة. ثم بناء ردك *حصرياً* باستخدام هذا القالب الثابت (انسخ العناوين كما هي واملأها):
+
+---
+📋 **تقرير الفحص السقراطي:**
+
+✅ **النقاط المكتسبة:** 
+- [اذكر باختصار شديد ما أصاب فيه، مثال: النشر والتحليل صحيحان].
+
+❌ **الأخطاء المرصودة (بدون إعطاء الحل):**
+- [الخطأ 1: كذا وكذا...]
+- [الخطأ 2: كذا وكذا...] (إذا لم توجد أخطاء، اكتب: لا يوجد).
+
+⚠️ **الأسئلة المتجاهلة أو الناقصة:**
+- [السؤال كذا...] (إذا أجاب على كل شيء، اكتب: لا يوجد).
+
+📌 **تنبيه هام:** تذكر يا بطل أن التصحيح النهائي والتقييم سيكون من طرف أستاذك (الأستاذ جعفري). دوري هنا هو تدريبك لتفادي هذه الأخطاء أمامه!
+
+🎯 **مهمتنا الآن (خطوة بخطوة):**
+[اطرح هنا سؤالاً سقراطياً واحداً فقط لمعالجة الخطأ الأول أو النقص الأول. يُمنع منعاً باتاً مناقشة أكثر من نقطة واحدة في نفس الوقت].
+---
+
+قواعد إضافية للتتبع:
+1. في الردود القادمة، لا تنتقل إلى "الخطأ 2" حتى يصحح التلميذ "الخطأ 1" بنسبة 100%.
+2. ذكر التلميذ دائماً بما تبقى من القائمة أعلاه إذا حاول التهرب أو القفز لسؤال آخر.
 
 ====================
 [الدستور العام للنشاط (القوانين والمعارف)]:
