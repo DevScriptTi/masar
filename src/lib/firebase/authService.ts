@@ -7,7 +7,12 @@ import {
   writeBatch,
   serverTimestamp,
 } from "firebase/firestore";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import {
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  sendEmailVerification,
+  User,
+} from "firebase/auth";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { auth, db, storage } from "@/lib/firebase/config";
 
@@ -108,4 +113,26 @@ export async function registerStudent(formData: StudentRegisterInput): Promise<s
   await batch.commit();
 
   return user.uid;
+}
+
+/**
+ * Send Password Reset Email using native Firebase Auth.
+ * Automatically handled by Firebase with zero domain configuration needed.
+ */
+export async function sendPasswordReset(email: string): Promise<void> {
+  if (!email || !email.includes("@")) {
+    throw new Error("يرجى تقديم بريد إلكتروني صحيح.");
+  }
+  await sendPasswordResetEmail(auth, email.trim());
+}
+
+/**
+ * Send Email Verification link to the current authenticated user using native Firebase Auth.
+ */
+export async function sendUserEmailVerification(user?: User | null): Promise<void> {
+  const targetUser = user || auth.currentUser;
+  if (!targetUser) {
+    throw new Error("لا يوجد مستخدم مسجل حالياً لإرسال رابط التحقق.");
+  }
+  await sendEmailVerification(targetUser);
 }

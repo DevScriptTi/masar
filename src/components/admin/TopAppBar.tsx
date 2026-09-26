@@ -6,7 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useAdminLayout } from "./AdminLayoutWrapper";
 import { ThemeToggle } from "@/src/components/ThemeToggle";
 import { NotificationBell } from "@/src/components/student/NotificationBell";
-import { Menu, ShieldCheck, Bell, User, Settings } from "lucide-react";
+import { Menu, ShieldCheck, Bell, User, Settings, MessageSquare } from "lucide-react";
 
 export function TopAppBar() {
   const { userData } = useAuth();
@@ -46,13 +46,24 @@ export function TopAppBar() {
         </div>
       </div>
 
-      {/* Left Side (RTL End): Action Group (Theme Toggle, Notifications, Profile Link) */}
+      {/* Left Side (RTL End): Action Group (Chat, Theme Toggle, Notifications, Profile Link) */}
       <div className="flex items-center gap-2.5 sm:gap-3">
-        {/* Theme Toggle Button */}
-        <ThemeToggle />
+        {/* Teacher Chat / Messages Button */}
+        <Link
+          href="/teacher/messages"
+          className="relative p-2.5 rounded-2xl bg-surface-variant/50 hover:bg-surface-variant text-on-surface-variant hover:text-primary border border-outline/10 text-xs font-semibold transition-all duration-200 active:scale-95 flex items-center justify-center"
+          title="الرسائل والاستفسارات المباشرة مع الطلاب"
+        >
+          <MessageSquare className="w-5 h-5 text-primary" />
+          {/* Unread badge ping */}
+          <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
+        </Link>
 
         {/* Real-time Notification Bell */}
         <NotificationBell />
+
+        {/* Theme Toggle Button */}
+        <ThemeToggle />
 
         {/* Profile / Settings Button */}
         <Link

@@ -10,6 +10,7 @@ import { signOut } from "firebase/auth";
 import { CourseCard } from "@/src/components/student/CourseCard";
 import { ThemeToggle } from "@/src/components/ThemeToggle";
 import { NotificationBell } from "@/src/components/student/NotificationBell";
+import { UserProfileDropdown } from "@/src/components/student/UserProfileDropdown";
 import {
   GraduationCap,
   BookOpen,
@@ -18,6 +19,7 @@ import {
   Loader2,
   Sparkles,
   User,
+  MessageSquare,
 } from "lucide-react";
 
 export default function StudentDashboardPage() {
@@ -229,25 +231,18 @@ export default function StudentDashboardPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Link
+            href="/dashboard/chat"
+            className="h-10 px-3.5 rounded-xl bg-primary/10 text-primary font-bold text-xs hover:bg-primary/20 transition-all flex items-center gap-1.5 border border-primary/20"
+            title="محادثة الأساتذة المباشرة"
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span className="hidden sm:inline">محادثة الأساتذة</span>
+          </Link>
           <NotificationBell />
           <ThemeToggle />
-          <Link
-            href="/settings"
-            className="h-10 px-3.5 rounded-xl bg-surface-variant/40 text-on-surface-variant font-bold text-xs hover:bg-surface-variant hover:text-on-surface transition-all flex items-center gap-1.5 border border-outline/10"
-            title="إعدادات الحساب والملف الشخصي"
-          >
-            <User className="w-4 h-4" />
-            <span className="hidden sm:inline">الملف الشخصي</span>
-          </Link>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="h-10 px-4 rounded-xl bg-surface-variant/40 text-on-surface-variant font-bold text-xs hover:bg-error-container/30 hover:text-error transition-all flex items-center gap-1.5 border border-outline/10"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">تسجيل الخروج</span>
-          </button>
+          <UserProfileDropdown />
         </div>
       </header>
 
@@ -281,14 +276,21 @@ export default function StudentDashboardPage() {
             </p>
           </div>
 
-          {/* Key Activation Quick Button */}
-          <div className="relative z-10 shrink-0">
+          {/* Quick Action Buttons */}
+          <div className="relative z-10 shrink-0 flex flex-wrap items-center gap-3">
+            <Link
+              href="/dashboard/chat"
+              className="h-12 px-5 rounded-2xl bg-primary text-on-primary font-extrabold text-xs hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-sm"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>محادثة الأساتذة</span>
+            </Link>
             <Link
               href="/dashboard/activate"
-              className="h-12 px-6 rounded-2xl bg-secondary/15 border border-secondary/30 text-secondary font-extrabold text-xs hover:bg-secondary/25 transition-all flex items-center justify-center gap-2 shadow-2xs"
+              className="h-12 px-5 rounded-2xl bg-secondary/15 border border-secondary/30 text-secondary font-extrabold text-xs hover:bg-secondary/25 transition-all flex items-center justify-center gap-2 shadow-2xs"
             >
               <KeyRound className="w-4 h-4" />
-              <span>تفعيل رمز جديد (Key Activation)</span>
+              <span>تفعيل رمز (Key)</span>
             </Link>
           </div>
         </div>

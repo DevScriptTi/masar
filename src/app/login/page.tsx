@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/src/components/ThemeToggle";
 import { LogIn, Lock, Mail, Eye, EyeOff, Loader2, GraduationCap, ShieldCheck } from "lucide-react";
 
 import { RoleSelectionModal } from "@/src/components/auth/RoleSelectionModal";
+import { sendPasswordReset } from "@/src/lib/firebase/authService";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,7 +23,36 @@ export default function LoginPage() {
 
   // Status & Error states
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const handleForgotPassword = async () => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (!email.trim() || !email.includes("@")) {
+      setErrorMessage("يرجى إدخال بريدك الإلكتروني أولاً لإرسال رابط إعادة تعيين كلمة المرور.");
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      await sendPasswordReset(email.trim());
+      setSuccessMessage(`تم إرسال رابط إعادة تعيين كلمة المرور بنجاح إلى ${email.trim()}. يرجى مراجعة بريدك الإلكتروني.`);
+    } catch (error: any) {
+      console.error("Password reset error:", error);
+      if (error?.code === "auth/user-not-found") {
+        setErrorMessage("لم يتم العثور على حساب مسجل بهذا البريد الإلكتروني.");
+      } else if (error?.code === "auth/invalid-email") {
+        setErrorMessage("صيغة البريد الإلكتروني غير صحيحة.");
+      } else {
+        setErrorMessage(error?.message || "تعذر إرسال رابط إعادة التعيين. يرجى المحاولة لاحقاً.");
+      }
+    } finally {
+      setResetLoading(false);
+    }
+  };
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -114,6 +144,14 @@ export default function LoginPage() {
             </p>
           </div>
 
+          {/* Success Alert Box */}
+          {successMessage && (
+            <div className="mb-6 p-4 rounded-2xl bg-primary-container/70 border border-primary/30 text-on-primary-container text-sm flex items-start gap-3 animate-fadeIn">
+              <span className="inline-block w-2 h-2 rounded-full bg-primary mt-1.5 shrink-0" />
+              <p className="leading-relaxed">{successMessage}</p>
+            </div>
+          )}
+
           {/* Error Alert Box */}
           {errorMessage && (
             <div className="mb-6 p-4 rounded-2xl bg-error-container/70 border border-error/30 text-on-error-container text-sm flex items-start gap-3 animate-fadeIn">
@@ -140,7 +178,7 @@ export default function LoginPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@example.com"
                   dir="ltr"
-                  disabled={loading}
+                  disabled={loading || resetLoading}
                   required
                   className="w-full h-12 pr-11 pl-4 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface placeholder:text-on-surface-variant/50 text-right focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all duration-200 disabled:opacity-60 text-sm"
                 />
@@ -150,12 +188,22 @@ export default function LoginPage() {
 
             {/* Password Input */}
             <div className="space-y-2">
-              <label
-                htmlFor="password"
-                className="block text-xs font-medium text-on-surface-variant"
-              >
-                كلمة المرور
-              </label>
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="password"
+                  className="block text-xs font-medium text-on-surface-variant"
+                >
+                  كلمة المرور
+                </label>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={resetLoading || loading}
+                  className="text-xs text-primary font-medium hover:underline disabled:opacity-60 transition-colors cursor-pointer"
+                >
+                  {resetLoading ? "جاري الإرسال..." : "نسيت كلمة المرور؟"}
+                </button>
+              </div>
               <div className="relative flex items-center">
                 <input
                   id="password"
@@ -164,7 +212,7 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   dir="ltr"
-                  disabled={loading}
+                  disabled={loading || resetLoading}
                   required
                   className="w-full h-12 pr-11 pl-11 rounded-xl bg-surface-variant/40 border border-outline/30 text-on-surface placeholder:text-on-surface-variant/50 text-right focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-all duration-200 disabled:opacity-60 text-sm"
                 />

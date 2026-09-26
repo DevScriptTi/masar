@@ -14,6 +14,7 @@ import {
   Users,
   BookOpen,
   ClipboardCheck,
+  MessageSquare,
   LogOut,
   ChevronLeft,
   X,
@@ -56,6 +57,11 @@ export function AdminSidebar() {
       title: "تصحيح التسليمات",
       href: "/teacher/evaluations",
       icon: ClipboardCheck,
+    },
+    {
+      title: "الرسائل والاستفسارات",
+      href: "/teacher/messages",
+      icon: MessageSquare,
     },
   ];
 

@@ -19,6 +19,7 @@ import { MathText } from "@/src/components/admin/activities/StudentPreview";
 import { formatPdfEmbedUrl, formatYouTubeUrl } from "@/src/lib/utils/formatters";
 import { ThemeToggle } from "@/src/components/ThemeToggle";
 import { NotificationBell } from "@/src/components/student/NotificationBell";
+import { UserProfileDropdown } from "@/src/components/student/UserProfileDropdown";
 import { AITutorWidget } from "@/src/components/student/AITutorWidget";
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from "@/src/components/ui/sheet";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/src/components/ui/accordion";
@@ -46,6 +47,7 @@ import {
   X,
   Menu,
   ListFilter,
+  MessageSquare,
 } from "lucide-react";
 
 import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
@@ -533,10 +535,30 @@ export default function StudentCoursePlayerPage({
           <span>العودة إلى لوحة التحكم</span>
         </Link>
 
-        {/* Global Icons */}
-        <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+        {/* Global Icons & Actions */}
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+          {/* Teacher Chat Button */}
+          <Link
+            href="/dashboard/chat"
+            className="relative h-10 px-2.5 sm:px-3 rounded-xl bg-surface-variant/30 hover:bg-surface-variant/60 text-on-surface-variant hover:text-primary transition-all flex items-center gap-1.5 border border-outline/10 text-xs font-bold"
+            title="محادثة الأساتذة المباشرة"
+          >
+            <div className="relative flex items-center justify-center">
+              <MessageSquare className="w-4 h-4 text-primary" />
+              {/* Unread ping indicator */}
+              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-primary animate-pulse" />
+            </div>
+            <span className="hidden md:inline">محادثة الأساتذة</span>
+          </Link>
+
+          {/* Notification Bell */}
           <NotificationBell />
+
+          {/* Theme Toggle */}
           <ThemeToggle />
+
+          {/* User Profile Dropdown */}
+          <UserProfileDropdown />
         </div>
       </header>
 
@@ -776,7 +798,8 @@ export default function StudentCoursePlayerPage({
                   )}
 
                   {/* SECTION 3: AI Station */}
-                  {activeActivity.id && (
+                  {/* AI STATION DISABLED TEMPORARILY FOR MCP REWRITE */}
+                  {false && activeActivity.id && (
                     <AccordionItem className="border-none bg-card/40 rounded-2xl overflow-hidden shadow-xs" value="section-ai">
                       <AccordionTrigger className="flex items-center justify-between p-5 hover:no-underline hover:bg-indigo-500/10 transition-all [&[data-state=open]]:bg-indigo-500/5 cursor-pointer w-full text-right">
                         <div className="flex items-center gap-4">
@@ -800,8 +823,8 @@ export default function StudentCoursePlayerPage({
                             courseName={course?.title}
                             moduleName={modules.find((m) => m.id === activeActivity.moduleId)?.title || ""}
                             courseIndexContext={course?.courseIndexContext}
-                            activityId={activeActivity.id}
-                            activityTitle={activeActivity.title}
+                            activityId={activeActivity.id || ""}
+                            activityTitle={activeActivity.title || ""}
                             activityDescription={activeActivity.description}
                             globalLatexSummary={activeActivity.globalLatexSummary}
                             globalCustomIsolations={activeActivity.globalCustomIsolations}
@@ -986,28 +1009,30 @@ export default function StudentCoursePlayerPage({
       )}
 
       {/* AI Math Tutor Socratic Floating Widget */}
-      {/* AI Math Tutor Socratic Floating Widget */}
-      <AITutorWidget
-        studentId={user?.uid} // <--- السطر الحاسم لربط الذاكرة بالمعرف الحقيقي للتلميذ
-        studentName={studentName}
-        lessonTitle={activeActivity?.title}
-        lessonSummary={activeActivity?.description}
-        submissionUrls={currentSubmissionUrls}
-        submissionId={currentSubmissionId}
-        aiEvaluationCache={currentAiEvaluationCache}
-        hiddenTeacherDirectives={activeActivity?.hiddenTeacherDirectives}
-        moduleId={activeActivity?.moduleId}
-        courseId={courseId}
-        activityId={activeActivity?.id}
-        latexContent={
-          activeActivity?.attachments
-            ? activeActivity.attachments
-              .map((item) => (typeof item === "string" ? "" : item.latexContent || ""))
-              .filter(Boolean)
-              .join("\n\n")
-            : ""
-        }
-      />
+      {/* GLOBAL AGENT / AI WIDGET DISABLED FOR MCP REWRITE */}
+      {false && (
+        <AITutorWidget
+          studentId={user?.uid} // <--- السطر الحاسم لربط الذاكرة بالمعرف الحقيقي للتلميذ
+          studentName={studentName}
+          lessonTitle={activeActivity?.title}
+          lessonSummary={activeActivity?.description}
+          submissionUrls={currentSubmissionUrls}
+          submissionId={currentSubmissionId}
+          aiEvaluationCache={currentAiEvaluationCache}
+          hiddenTeacherDirectives={activeActivity?.hiddenTeacherDirectives}
+          moduleId={activeActivity?.moduleId}
+          courseId={courseId}
+          activityId={activeActivity?.id}
+          latexContent={
+            activeActivity?.attachments
+              ? (activeActivity.attachments as any[])
+                .map((item: any) => (typeof item === "string" ? "" : item?.latexContent || ""))
+                .filter(Boolean)
+                .join("\n\n")
+              : ""
+          }
+        />
+      )}
     </div>
   );
 }

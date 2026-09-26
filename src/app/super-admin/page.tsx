@@ -429,7 +429,7 @@ export default function SuperAdminDashboardPage() {
                 </div>
                 <div className="p-4 rounded-2xl bg-surface-variant/30 border border-outline/10 space-y-1">
                   <span className="font-bold text-on-surface block">حماية الهوية وحظر السبام:</span>
-                  <p>محرك Resend للبريد والتحقق بـ 6 أرقام مع مسارات التفعيل الآمنة.</p>
+                  <p>محرك البريد المزدوج (Firebase Auth و Nodemailer) والتحقق بـ 6 أرقام مع مسارات التفعيل الآمنة.</p>
                 </div>
                 <div className="p-4 rounded-2xl bg-surface-variant/30 border border-outline/10 space-y-1">
                   <span className="font-bold text-on-surface block">التحكم القيادي (Super Admin):</span>

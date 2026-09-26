@@ -55,7 +55,7 @@ export async function POST(req: Request) {
       success: true,
       message: `تم إرسال كود التفعيل إلى بريدك الإلكتروني: ${cleanEmail}`,
       emailSent: mailResult.success,
-      // For development testing when RESEND_API_KEY is not configured
+      // For development testing when GMAIL_APP_PASSWORD is not configured
       ...(process.env.NODE_ENV !== "production" ? { debugOtpCode: otpCode } : {}),
     });
   } catch (error: any) {
